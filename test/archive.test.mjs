@@ -50,6 +50,12 @@ test("materializeMhtml rewrites CSS and localizes captured resources", () => {
   assert.deepEqual(result.externalReferences, []);
 });
 
+test("rewriteCss resolves protocol-relative URLs stored with HTML quotes", () => {
+  const css = rewriteCss('background-image: url(&quot;//cdn.example.test/a.jpg&quot;)', "http://www.sdhhtc.com/h-col-104.html", new Map(), "");
+  assert.match(css, /https:\/\/cdn\.example\.test\/a\.jpg/);
+  assert.doesNotMatch(css, /sdhhtc\.com\/&quot;/);
+});
+
 test("rewriteCss resolves relative URLs against the stylesheet location", () => {
   const map = new Map([["https://example.test/img/a.png", "a.png"]]);
   assert.equal(
