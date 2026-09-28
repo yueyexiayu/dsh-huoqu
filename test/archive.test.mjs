@@ -42,7 +42,7 @@ test("materializeMhtml rewrites CSS and localizes captured resources", () => {
   const result = materializeMhtml(fixture);
   assert.match(result.html, /href="\.\/assets\//);
   assert.match(result.html, /src="\.\/assets\//);
-  assert.doesNotMatch(result.html, /<script/);
+  assert.match(result.html, /<script>bad\(\)<\/script>/);
   const css = result.assets.find((asset) => asset.mime === "text/css");
   assert.ok(css);
   assert.match(css.bytes.toString("utf8"), /url\("\d+-logo\.png"\)/);
@@ -93,7 +93,8 @@ test("materializeMhtml localizes fetched resources referenced by CSS", () => {
 });
 
 test("rewriteHtml stacks vertical slides so content below the first screen stays reachable", () => {
-  const html = rewriteHtml("<head></head><body><div class=\"swiper-container-vertical\"><div class=\"swiper-wrapper\" style=\"transform:translate3d(0,-1000px,0)\"><div class=\"swiper-slide\">第一屏</div><div class=\"swiper-slide\">新闻中心</div></div></div></body>", "https://example.test/", new Map());
+  const html = rewriteHtml("<head></head><body><div class=\"swiper-container-vertical\"><div class=\"swiper-wrapper\" style=\"transform:translate3d(0,-1000px,0)\"><div class=\"swiper-slide\">第一屏</div><div class=\"swiper-slide\">新闻中心</div></div></div><script src=\"https://cdn.example.test/app.js\"></script></body>", "https://example.test/", new Map(), { unfold: true });
+  assert.match(html, /<script src="https:\/\/cdn\.example\.test\/app\.js"/);
   assert.match(html, /id="huoqu-unfold"/);
   assert.match(html, /transform: none !important/);
   assert.match(html, /flex-direction: column !important/);
@@ -108,7 +109,7 @@ test("buildMhtml packages rewritten HTML, stylesheets and assets as a self-conta
   const reopened = materializeMhtml(archive);
   assert.equal(reopened.resourceCount, materialized.resourceCount);
   assert.deepEqual(reopened.externalReferences, []);
-  assert.doesNotMatch(reopened.html, /<script/);
+  assert.match(reopened.html, /<script>bad\(\)<\/script>/);
 });
 
 test("htmlToMhtml keeps the live document when the browser snapshot cannot cross the extension bridge", () => {
