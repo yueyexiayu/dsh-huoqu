@@ -2,7 +2,9 @@
 
 当前项目是深度适配个人使用，项目只是给大家提供思路和借鉴，尽量不要直接照搬。
 
-在 DeepSeek Harness 里采集一个网页的渲染结果，保存为可离线打开的本地副本。优先使用当前 Chrome 里已连接的 DSH 扩展，在后台标签打开页面；扩展未连接时才使用隔离的无头 Chrome。
+在 DeepSeek Harness 里采集一个网页的渲染结果，保存为可离线打开的本地副本。
+
+当前插件需要配合 [Chrome 插件项目](https://github.com/yueyexiayu/dsh-chrome) 的 Chrome 扩展。网页获取会复用这个扩展，在当前正式 Chrome 的后台标签里打开页面，不另开调试端口。扩展未连接时才会退回隔离的无头 Chrome，部分站点会把无头浏览器当成可疑请求拦截。
 
 - 本地入口：`index.html`
 - 单文件副本：`index.mhtml`
@@ -23,7 +25,7 @@
 
 完全退出 DeepSeek Harness（macOS：⌘Q）再打开。侧栏会出现「网页获取」。
 
-若要避开把无头浏览器当成可疑请求的站点，请先在要使用的 Chrome 里加载 DSH Chrome 扩展。网页获取会复用这个扩展的后台标签，不另开调试端口。
+使用前请先安装并连接 [dsh-chrome](https://github.com/yueyexiayu/dsh-chrome) 的 Chrome 扩展。这是配套要求，不是可选项。
 
 ## 开发
 
