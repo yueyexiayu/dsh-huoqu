@@ -20,6 +20,18 @@ test("blockedPageMessage identifies a firewall interstitial instead of site cont
   assert.equal(blockedPageMessage({ title: "昊华搪瓷官方网站", textSample: "金刚甲搪瓷水箱" }), "");
 });
 
+test("blockedPageMessage allows ordinary prose containing challenge-like phrases", () => {
+  assert.equal(blockedPageMessage({ title: "A travel journal", textSample: "Just a moment before sunrise, we stopped to admire the view." }), "");
+  assert.equal(blockedPageMessage({ title: "Just a moment in history", textSample: "Attention required when preserving historical documents." }), "");
+});
+
+test("blockedPageMessage still detects challenge titles and distinctive markers", () => {
+  for (const title of ["Just a moment...", "Attention Required! | Cloudflare"]) {
+    assert.match(blockedPageMessage({ title, textSample: "Checking your browser" }), /人机验证/);
+  }
+  assert.match(blockedPageMessage({ title: "Verify", textSample: "cf-browser-verification" }), /人机验证/);
+});
+
 test("unexpectedOutputEntries ignores Finder metadata and a previous capture", () => {
   assert.deepEqual(unexpectedOutputEntries([".DS_Store", "index.html", "assets"]), []);
   assert.deepEqual(unexpectedOutputEntries([".huoqu-staging-1", ".huoqu-replaced-1"]), [".huoqu-staging-1", ".huoqu-replaced-1"]);

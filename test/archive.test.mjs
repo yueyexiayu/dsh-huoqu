@@ -236,3 +236,75 @@ test("inlined SVG rewrites absolute same-SVG references and leaves unsupported t
   assert.match(saved.html, /<g id="huoqu-svg-[^"]+"><use href="#huoqu-svg-/);
   assert.doesNotMatch(saved.html, /adjust\(\)/);
 });
+
+test("redirected resources reuse a captured final URL and retain requested URL aliases", () => {
+  const saved = materializeMhtml(htmlToMhtml('<img src="/final.png"><img src="/redirect.png">', "https://example.test/"), [
+    { url: "https://example.test/final.png", mime: "image/png", bytes: Buffer.from("png") },
+    { url: "https://example.test/redirect.png", finalUrl: "https://example.test/final.png", mime: "image/png", bytes: Buffer.from("png") },
+  ]);
+  assert.equal(saved.resourceCount, 1);
+  assert.equal(saved.html, '<meta charset="utf-8"><img src="./assets/001-final.png"><img src="./assets/001-final.png">');
+  assert.deepEqual(saved.externalReferences, []);
+});
+
+test("image-set string URLs are discovered, localized and packaged without rewriting MIME strings", () => {
+  const html = '<style>.hero{background:image-set("/small.png" 1x type("image/png"), url(/large.png) 2x);mask-image:-webkit-image-set("/mask.png" 1x)}</style>';
+  const initial = materializeMhtml(htmlToMhtml(html, "https://example.test/"));
+  assert.deepEqual(new Set(initial.externalReferences), new Set([
+    "https://example.test/small.png", "https://example.test/large.png", "https://example.test/mask.png",
+  ]));
+  const saved = materializeMhtml(htmlToMhtml(html, "https://example.test/"), ["small", "large", "mask"].map((name) => ({
+    url: `https://example.test/${name}.png`, mime: "image/png", bytes: Buffer.from(name),
+  })));
+  assert.match(saved.html, /image-set\("\.\/assets\/001-small.png" 1x type\("image\/png"\), url\("\.\/assets\/002-large.png"\) 2x\)/);
+  assert.match(saved.html, /-webkit-image-set\("\.\/assets\/003-mask.png" 1x\)/);
+  assert.deepEqual(saved.externalReferences, []);
+  const archiveHtml = parseMhtml(buildMhtml(saved, "https://example.test/")).main.text;
+  assert.match(archiveHtml, /image-set\("cid:huoqu-1" 1x type\("image\/png"\), url\("cid:huoqu-2"\) 2x\)/);
+  assert.match(archiveHtml, /-webkit-image-set\("cid:huoqu-3" 1x\)/);
+  assert.equal(rewriteCss('content:"image-set(\\"/literal.png\\" 1x)";/* image-set("/comment.png" 1x) */', "https://example.test/", new Map()),
+    'content:"image-set(\\"/literal.png\\" 1x)";/* image-set("/comment.png" 1x) */');
+});
+
+test("standalone SVG dependencies are discovered, localized and rewritten to MHTML cid URLs", () => {
+  const html = '<object data="/icons/visual.svg" type="image/svg+xml"></object>';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><style>.x{background:image-set("../picture.png" 1x)}</style><image href="../picture.png"/><rect filter="url(../effects.svg#blur)"/></svg>';
+  const resources = [{ url: "https://example.test/icons/visual.svg", mime: "image/svg+xml", bytes: Buffer.from(svg) }];
+  const initial = materializeMhtml(htmlToMhtml(html, "https://example.test/"), resources);
+  assert.deepEqual(new Set(initial.externalReferences), new Set(["https://example.test/picture.png", "https://example.test/effects.svg#blur"]));
+  const saved = materializeMhtml(htmlToMhtml(html, "https://example.test/"), resources.concat([
+    { url: "https://example.test/picture.png", mime: "image/png", bytes: Buffer.from("png") },
+    { url: "https://example.test/effects.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><filter id="blur"/></svg>') },
+  ]));
+  const localSvg = saved.assets[0].bytes.toString("utf8");
+  assert.match(localSvg, /href="002-picture.png"/);
+  assert.match(localSvg, /filter="url\(&quot;003-effects.svg#blur&quot;\)"/);
+  assert.doesNotMatch(localSvg, /https:\/\/example\.test|<meta/);
+  assert.deepEqual(saved.externalReferences, []);
+  const archiveSvg = parseMhtml(buildMhtml(saved, "https://example.test/")).parts.find((part) => part.id === "huoqu-1").text;
+  assert.match(archiveSvg, /href="cid:huoqu-2"/);
+  assert.match(archiveSvg, /filter="url\(&quot;cid:huoqu-3#blur&quot;\)"/);
+});
+
+test("SVG presentation URL attributes are discovered and localized in the main page", () => {
+  const html = '<svg><rect fill="url(/effects.svg#paint)" clip-path="url(/effects.svg#clip)" stroke="url(#local)"/></svg>';
+  const initial = materializeMhtml(htmlToMhtml(html, "https://example.test/"));
+  assert.deepEqual(new Set(initial.externalReferences), new Set(["https://example.test/effects.svg#paint", "https://example.test/effects.svg#clip"]));
+  const saved = materializeMhtml(htmlToMhtml(html, "https://example.test/"), [{
+    url: "https://example.test/effects.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><linearGradient id="paint"/><clipPath id="clip"/></svg>'),
+  }]);
+  assert.match(saved.html, /fill="url\(&quot;\.\/assets\/001-effects.svg#paint&quot;\)"/);
+  assert.match(saved.html, /clip-path="url\(&quot;\.\/assets\/001-effects.svg#clip&quot;\)"/);
+  assert.match(saved.html, /stroke="url\(&quot;#local&quot;\)"/);
+  assert.deepEqual(saved.externalReferences, []);
+  const archiveHtml = parseMhtml(buildMhtml(saved, "https://example.test/")).main.text;
+  assert.match(archiveHtml, /fill="url\(&quot;cid:huoqu-1#paint&quot;\)"/);
+});
+
+test("image-set decodes CSS string escapes and preserves unchanged data URLs", () => {
+  const map = new Map([["https://example.test/small.png", "small.png"], ["https://example.test/other%20image.png", "other.png"]]);
+  assert.equal(rewriteCss('image-set("/sm\\61 ll.png" 1x, \'/other\\ image.png\' 2x)', "https://example.test/", map),
+    'image-set("./assets/small.png" 1x, \'./assets/other.png\' 2x)');
+  const data = 'image-set("data:image/svg+xml,<svg id=\\"x\\"/>" 1x)';
+  assert.equal(rewriteCss(data, "https://example.test/", map), data);
+});

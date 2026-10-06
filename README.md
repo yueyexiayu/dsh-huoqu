@@ -35,9 +35,15 @@ Chrome 可能禁用 MHTML 内的脚本，交互组件请优先使用 `index.html
 
 Chrome 插件也需要更新到提供 `openCaptureSession` 的版本。采集使用独立的后台标签和所有权，完成或取消后释放，不切换对话正在操作的标签。
 
+### 0.1.1 修复
+
+保留重定向资源的原始地址映射；补齐 CSS `image-set()`、独立 SVG 及 SVG 属性的资源发现和离线改写。额外下载最多尝试 120 个资源，按读取字节限制 100 MiB 总预算，耗尽后停止新请求。修复 IPv4 映射 IPv6 的私网识别，以及普通正文包含 “Just a moment” 时被误判为验证页的问题。
+
 ## 开发
 
+开发检出时，把 `dsh-chrome` 放在本项目同级的 `chrome/` 目录，供 Host 与采集测试使用。
+
 ```bash
-/usr/local/bin/node --check lib/index.js lib/capture.js lib/archive.js lib/parse.js lib/client.js
-/usr/local/bin/node --test test/*.test.mjs
+for file in lib/*.js; do node --check "$file" || exit; done
+node --test test/*.test.mjs
 ```
