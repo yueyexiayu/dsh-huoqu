@@ -26,4 +26,10 @@ test("host entry registers huoqu tool and the declared route", async () => {
   }));
   assert.equal(invalid.status, 400);
   assert.match((await invalid.json()).error, /http and https/);
+
+  const rendered = tool.output.render({}, { ok: false, status: "partial", indexHtml: "/tmp/huoqu/index.html", warnings: ["index.html 有图片未加载"] });
+  assert.match(rendered[0].text, /网页已保存，但离线检查未完全通过/);
+  assert.doesNotMatch(rendered[0].text, /副本已生成并通过离线检查/);
+  assert.match(rendered[0].text, /保留原站脚本和组件/);
+  assert.match(rendered[0].text, /图片未加载/);
 });

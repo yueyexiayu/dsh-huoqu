@@ -52,7 +52,7 @@ test("materializeMhtml rewrites CSS and localizes captured resources", () => {
 
 test("rewriteCss resolves protocol-relative URLs stored with HTML quotes", () => {
   const css = rewriteCss('background-image: url(&quot;//cdn.example.test/a.jpg&quot;)', "http://www.sdhhtc.com/h-col-104.html", new Map(), "");
-  assert.match(css, /https:\/\/cdn\.example\.test\/a\.jpg/);
+  assert.match(css, /http:\/\/cdn\.example\.test\/a\.jpg/);
   assert.doesNotMatch(css, /sdhhtc\.com\/&quot;/);
 });
 
@@ -117,4 +117,122 @@ test("htmlToMhtml keeps the live document when the browser snapshot cannot cross
   const parsed = materializeMhtml(archive);
   assert.match(parsed.html, /昊华搪瓷/);
   assert.equal(parsed.sourceUrl, "http://www.sdhhtc.com/");
+});
+
+test("srcset retains a data URL and localizes the following candidate", () => {
+  const map = new Map([["https://example.test/high.png", "high.png"]]);
+  assert.equal(rewriteHtml('<img srcset="data:image/png;base64,aGVsbG8= 1x, /high.png 2x">', "https://example.test/", map),
+    '<img srcset="data:image/png;base64,aGVsbG8= 1x, ./assets/high.png 2x">');
+});
+
+test("localized SVG references retain their fragment identifiers", () => {
+  const map = new Map([["https://example.test/sprite.svg", "sprite.svg"]]);
+  assert.equal(rewriteHtml('<svg><use xlink:href="/sprite.svg#logo"></use></svg>', "https://example.test/", map),
+    '<svg><use xlink:href="./assets/sprite.svg#logo"></use></svg>');
+  assert.equal(rewriteCss('filter:url(/sprite.svg#filter)', "https://example.test/", map), 'filter:url("./assets/sprite.svg#filter")');
+});
+
+test("the first base href resolves HTML, inline CSS and navigation before removing base tags", () => {
+  const map = new Map([["https://cdn.example.test/static/a.png", "a.png"]]);
+  const html = rewriteHtml('<head><base href="//cdn.example.test/static/"><base href="/ignored/"></head><img src=a.png><div style="background:url(a.png)"></div><a href="next">Next</a>', "https://example.test/page", map);
+  assert.match(html, /src="\.\/assets\/a.png"/);
+  assert.match(html, /background:url\(&quot;\.\/assets\/a.png&quot;\)/);
+  assert.match(html, /href="https:\/\/cdn.example.test\/static\/next"/);
+  assert.doesNotMatch(html, /<base/);
+});
+
+test("resource discovery includes inline CSS, iframe HTML and SVG dependencies but excludes navigation", () => {
+  const root = '<html><head><style>@import "/theme.css";</style></head><body style="background:url(/background.png)"><iframe src="/frame.html"></iframe><svg><use href="/sprite.svg#symbol"></use></svg><a href="/about">About</a></body></html>';
+  const captured = materializeMhtml(htmlToMhtml(root, "https://example.test/"), [{
+    url: "https://example.test/frame.html", mime: "text/html", bytes: Buffer.from('<img src="/inside.png"><div style="background:url(/inside-bg.png)"></div>'),
+  }]);
+  assert.deepEqual(new Set(captured.externalReferences), new Set([
+    "https://example.test/theme.css", "https://example.test/background.png", "https://example.test/sprite.svg#symbol", "https://example.test/inside.png", "https://example.test/inside-bg.png",
+  ]));
+});
+
+test("rewriting does not alter attribute-looking text inside scripts or comments", () => {
+  const html = '<script>const text = \'src="/keep"\';</script><!-- <img src="/comment"> --><img src="/real">';
+  const result = rewriteHtml(html, "https://example.test/", new Map());
+  assert.match(result, /const text = 'src="\/keep"'/);
+  assert.match(result, /<!-- <img src="\/comment"> -->/);
+  assert.match(result, /<img src="https:\/\/example.test\/real">/);
+  assert.deepEqual(materializeMhtml(htmlToMhtml(html, "https://example.test/")).externalReferences, ["https://example.test/real"]);
+});
+
+test("MHTML rewrites nested HTML and srcset resources to cid references", () => {
+  const materialized = {
+    html: '<iframe src="./assets/frame.html"></iframe><img srcset="./assets/a.png 1x, ./assets/b.png 2x">',
+    assets: [
+      { name: "frame.html", mime: "text/html", url: "https://example.test/frame", bytes: Buffer.from('<img src="a.png"><svg><use href="sprite.svg#logo"></use></svg>') },
+      { name: "a.png", mime: "image/png", url: "https://example.test/a.png", bytes: Buffer.from("a") },
+      { name: "b.png", mime: "image/png", url: "https://example.test/b.png", bytes: Buffer.from("b") },
+      { name: "sprite.svg", mime: "image/svg+xml", url: "https://example.test/sprite.svg", bytes: Buffer.from('<svg id="logo"></svg>') },
+    ],
+  };
+  const parsed = parseMhtml(buildMhtml(materialized, "https://example.test/"));
+  assert.match(parsed.main.text, /srcset="cid:huoqu-2 1x, cid:huoqu-3 2x"/);
+  const frame = parsed.parts.find((part) => part.id === "huoqu-1");
+  assert.match(frame.text, /src="cid:huoqu-2"/);
+  assert.match(frame.text, /href="cid:huoqu-4#logo"/);
+});
+
+test("MHTML decodes declared legacy charsets and normalizes saved HTML to UTF-8", () => {
+  const bytes = Buffer.concat([Buffer.from('<meta charset="windows-1252"><p>caf'), Buffer.from([0xe9]), Buffer.from('</p>')]);
+  const source = htmlToMhtml("placeholder", "https://example.test/")
+    .replace('charset="utf-8"', 'charset="windows-1252"')
+    .replace(Buffer.from("placeholder").toString("base64"), bytes.toString("base64"));
+  const result = materializeMhtml(source);
+  assert.match(result.html, /café/);
+  assert.match(result.html, /charset="utf-8"/);
+  const css = materializeMhtml(htmlToMhtml('<link rel="stylesheet" href="/style.css">', "https://example.test/"), [{
+    url: "https://example.test/style.css", mime: "text/css; charset=windows-1252", bytes: Buffer.concat([Buffer.from('/* caf'), Buffer.from([0xe9]), Buffer.from(' */')]),
+  }]).assets[0];
+  assert.match(css.bytes.toString("utf8"), /café/);
+});
+
+test("external SVG use and feImage inline captured targets without colliding IDs", () => {
+  const page = '<html><body><div id="logo"></div><svg><use href="/one.svg#logo"></use><use href="/two.svg#logo"></use><filter id="preview"><feImage href="/one.svg"></feImage></filter></svg></body></html>';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><defs><linearGradient id="paint"><stop stop-color="#285fd3"></stop></linearGradient></defs><rect id="logo" width="120" height="80" fill="url(#paint)"></rect></svg>';
+  const saved = materializeMhtml(htmlToMhtml(page, "https://example.test/"), [
+    { url: "https://example.test/one.svg", mime: "image/svg+xml", bytes: Buffer.from(svg) },
+    { url: "https://example.test/two.svg", mime: "image/svg+xml", bytes: Buffer.from(svg) },
+  ]);
+  const uses = [...saved.html.matchAll(/<use href="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(uses.length, 2);
+  assert.ok(uses.every((href) => href.startsWith("#") && href !== "#logo"));
+  assert.notEqual(uses[0], uses[1]);
+  for (const href of uses) assert.ok(saved.html.includes(`id="${href.slice(1)}"`));
+  assert.match(saved.html, /<feImage href="#/);
+  assert.doesNotMatch(saved.html, /<(?:use|feImage)[^>]*href="[^#]/);
+  assert.equal([...saved.html.matchAll(/id="logo"/g)].length, 1);
+  const ids = [...saved.html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const match of saved.html.matchAll(/fill="url\(#([^\)]+)\)"/g)) assert.ok(ids.includes(match[1]));
+  const mhtml = parseMhtml(buildMhtml(saved, "https://example.test/")).main.text;
+  for (const href of uses) assert.ok(mhtml.includes(`href="${href}"`));
+});
+
+test("inlined SVG resources keep their original URL base and localize dependencies", () => {
+  const saved = materializeMhtml(htmlToMhtml('<svg><use href="/icons/sprite.svg#logo"></use></svg>', "https://example.test/page"), [
+    { url: "https://example.test/icons/sprite.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><g id="logo"><image href="../img/a.png"></image></g></svg>') },
+    { url: "https://example.test/img/a.png", mime: "image/png", bytes: Buffer.from("png") },
+  ]);
+  assert.match(saved.html, /<image href="\.\/assets\/\d+-a.png"/);
+  assert.deepEqual(saved.externalReferences, []);
+  const mhtml = parseMhtml(buildMhtml(saved, "https://example.test/")).main.text;
+  assert.match(mhtml, /<image href="cid:huoqu-2"/);
+});
+
+test("inlined SVG rewrites absolute same-SVG references and leaves unsupported targets visible", () => {
+  const page = '<svg><use href="/icons.svg#logo"></use><use href="/icons.svg#missing"></use><use href="/scripted.svg#logo"></use></svg>';
+  const saved = materializeMhtml(htmlToMhtml(page, "https://example.test/"), [
+    { url: "https://example.test/icons.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><defs><rect id="shape" width="120" height="80"/></defs><g id="logo"><use href="https://example.test/icons.svg#shape"></use></g></svg>') },
+    { url: "https://example.test/scripted.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><rect id="logo"/><script>adjust()</script></svg>') },
+  ]);
+  assert.match(saved.html, /href="\.\/assets\/\d+-icons.svg#missing"/);
+  assert.match(saved.html, /href="\.\/assets\/\d+-scripted.svg#logo"/);
+  assert.doesNotMatch(saved.html, /href="\.\/assets\/\d+-icons.svg#shape"/);
+  assert.match(saved.html, /<g id="huoqu-svg-[^"]+"><use href="#huoqu-svg-/);
+  assert.doesNotMatch(saved.html, /adjust\(\)/);
 });

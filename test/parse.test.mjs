@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blockedPageMessage, normalizeCaptureOptions, unexpectedOutputEntries } from "../lib/parse.js";
+import { blockedPageMessage, normalizeCaptureOptions, offlinePreviewIssues, unexpectedOutputEntries } from "../lib/parse.js";
 
 test("normalizeCaptureOptions accepts an absolute HTTP URL and output folder", () => {
   const result = normalizeCaptureOptions({ url: "https://www.gree.cn/", output_dir: "/Users/ning/Downloads/测试", width: 1440, height: 1000 });
@@ -21,7 +21,8 @@ test("blockedPageMessage identifies a firewall interstitial instead of site cont
 });
 
 test("unexpectedOutputEntries ignores Finder metadata and a previous capture", () => {
-  assert.deepEqual(unexpectedOutputEntries([".DS_Store", "index.html", "assets", ".huoqu-staging-1"]), []);
+  assert.deepEqual(unexpectedOutputEntries([".DS_Store", "index.html", "assets"]), []);
+  assert.deepEqual(unexpectedOutputEntries([".huoqu-staging-1", ".huoqu-replaced-1"]), [".huoqu-staging-1", ".huoqu-replaced-1"]);
   assert.deepEqual(unexpectedOutputEntries([".DS_Store", "notes.txt"]), ["notes.txt"]);
 });
 
@@ -29,4 +30,13 @@ test("normalizeCaptureOptions validates viewport and output path", () => {
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test", width: 120 }), /width must be an integer/);
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test", output_dir: "relative/path" }), /absolute path/);
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test", output_dir: "/" }), /dedicated project folder/);
+});
+
+test("offline preview rejects blank, blocked and broken-image pages", () => {
+  const page = { document: { htmlBytes: 1500, textLength: 100 }, images: [{ loaded: true }] };
+  assert.deepEqual(offlinePreviewIssues(page, "index.html"), []);
+  assert.match(offlinePreviewIssues(null, "index.mhtml")[0], /没有返回/);
+  assert.match(offlinePreviewIssues({ ...page, document: { htmlBytes: 1500, textLength: 0 } }, "index.html")[0], /内容不足/);
+  assert.match(offlinePreviewIssues({ ...page, images: [{ loaded: false }] }, "index.html")[0], /图片未加载/);
+  assert.match(offlinePreviewIssues({ ...page, title: "Just a moment" }, "index.mhtml")[0], /人机验证/);
 });
