@@ -47,7 +47,13 @@ macOS 打开本地文件会等待 `open` 的退出状态；失败会显示错误
 
 完全退出 DeepSeek Harness（macOS：⌘Q）再打开，侧栏会出现「网页获取」。Host 修改需要重启才能加载；仅保存源码并不会更新正在运行的 Host。
 
+## 0.1.1 修复
+
+保留重定向资源的原始地址映射；补齐 CSS `image-set()`、独立 SVG 及 SVG 属性的资源发现和离线改写。额外下载最多尝试 120 个资源，读取字节共享 100 MiB 预算，失败响应也占用预算，耗尽后停止新请求。修复 IPv4 映射 IPv6 的私网识别，以及普通正文包含 “Just a moment” 时被误判为验证页的问题。静态化、权限、任务生命周期及清理修复见上述说明。
+
 ## 开发与验证
+
+当前 Host/桥接测试依赖同级 `chrome/` 中的配套插件。这是开发测试依赖；运行时无配套插件，采集仍可使用隔离 Chrome。
 
 ```bash
 for file in lib/*.js; do /usr/local/bin/node --check "$file" || exit; done
