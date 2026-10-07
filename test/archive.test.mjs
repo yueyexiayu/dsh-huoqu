@@ -42,7 +42,7 @@ test("materializeMhtml rewrites CSS and localizes captured resources", () => {
   const result = materializeMhtml(fixture);
   assert.match(result.html, /href="\.\/assets\//);
   assert.match(result.html, /src="\.\/assets\//);
-  assert.match(result.html, /<script>bad\(\)<\/script>/);
+  assert.doesNotMatch(result.html, /<script\b|bad\(\)/i);
   const css = result.assets.find((asset) => asset.mime === "text/css");
   assert.ok(css);
   assert.match(css.bytes.toString("utf8"), /url\("\d+-logo\.png"\)/);
@@ -94,7 +94,7 @@ test("materializeMhtml localizes fetched resources referenced by CSS", () => {
 
 test("rewriteHtml stacks vertical slides so content below the first screen stays reachable", () => {
   const html = rewriteHtml("<head></head><body><div class=\"swiper-container-vertical\"><div class=\"swiper-wrapper\" style=\"transform:translate3d(0,-1000px,0)\"><div class=\"swiper-slide\">第一屏</div><div class=\"swiper-slide\">新闻中心</div></div></div><script src=\"https://cdn.example.test/app.js\"></script></body>", "https://example.test/", new Map(), { unfold: true });
-  assert.match(html, /<script src="https:\/\/cdn\.example\.test\/app\.js"/);
+  assert.doesNotMatch(html, /<script\b/i);
   assert.match(html, /id="huoqu-unfold"/);
   assert.match(html, /transform: none !important/);
   assert.match(html, /flex-direction: column !important/);
@@ -109,7 +109,7 @@ test("buildMhtml packages rewritten HTML, stylesheets and assets as a self-conta
   const reopened = materializeMhtml(archive);
   assert.equal(reopened.resourceCount, materialized.resourceCount);
   assert.deepEqual(reopened.externalReferences, []);
-  assert.match(reopened.html, /<script>bad\(\)<\/script>/);
+  assert.doesNotMatch(reopened.html, /<script\b|bad\(\)/i);
 });
 
 test("htmlToMhtml keeps the live document when the browser snapshot cannot cross the extension bridge", () => {
@@ -121,14 +121,14 @@ test("htmlToMhtml keeps the live document when the browser snapshot cannot cross
 
 test("srcset retains a data URL and localizes the following candidate", () => {
   const map = new Map([["https://example.test/high.png", "high.png"]]);
-  assert.equal(rewriteHtml('<img srcset="data:image/png;base64,aGVsbG8= 1x, /high.png 2x">', "https://example.test/", map),
-    '<img srcset="data:image/png;base64,aGVsbG8= 1x, ./assets/high.png 2x">');
+  assert.match(rewriteHtml('<img srcset="data:image/png;base64,aGVsbG8= 1x, /high.png 2x">', "https://example.test/", map),
+    /<img srcset="data:image\/png;base64,aGVsbG8= 1x, \.\/assets\/high.png 2x">$/);
 });
 
 test("localized SVG references retain their fragment identifiers", () => {
   const map = new Map([["https://example.test/sprite.svg", "sprite.svg"]]);
-  assert.equal(rewriteHtml('<svg><use xlink:href="/sprite.svg#logo"></use></svg>', "https://example.test/", map),
-    '<svg><use xlink:href="./assets/sprite.svg#logo"></use></svg>');
+  assert.match(rewriteHtml('<svg><use xlink:href="/sprite.svg#logo"></use></svg>', "https://example.test/", map),
+    /<svg><use xlink:href="\.\/assets\/sprite.svg#logo"><\/use><\/svg>$/);
   assert.equal(rewriteCss('filter:url(/sprite.svg#filter)', "https://example.test/", map), 'filter:url("./assets/sprite.svg#filter")');
 });
 
@@ -151,10 +151,10 @@ test("resource discovery includes inline CSS, iframe HTML and SVG dependencies b
   ]));
 });
 
-test("rewriting does not alter attribute-looking text inside scripts or comments", () => {
+test("rewriting removes scripts but preserves inert comments", () => {
   const html = '<script>const text = \'src="/keep"\';</script><!-- <img src="/comment"> --><img src="/real">';
   const result = rewriteHtml(html, "https://example.test/", new Map());
-  assert.match(result, /const text = 'src="\/keep"'/);
+  assert.doesNotMatch(result, /<script\b|const text/i);
   assert.match(result, /<!-- <img src="\/comment"> -->/);
   assert.match(result, /<img src="https:\/\/example.test\/real">/);
   assert.deepEqual(materializeMhtml(htmlToMhtml(html, "https://example.test/")).externalReferences, ["https://example.test/real"]);

@@ -10,6 +10,15 @@ test("normalizeCaptureOptions accepts an absolute HTTP URL and output folder", (
   assert.equal(result.height, 1000);
 });
 
+test("normalized options remain stable across the HTTP and capture boundary", () => {
+  for (const wait_seconds of [0, 2, 17, 20]) {
+    const once = normalizeCaptureOptions({ url: "https://example.test/", output_dir: "/tmp/fixture", wait_seconds });
+    assert.equal(once.waitSeconds, wait_seconds);
+    assert.deepEqual(normalizeCaptureOptions(once), once);
+  }
+  assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", waitSeconds: 21 }), /wait_seconds/);
+});
+
 test("normalizeCaptureOptions rejects non-HTTP and credentialed URLs", () => {
   assert.throws(() => normalizeCaptureOptions({ url: "file:///etc/passwd" }), /http and https/);
   assert.throws(() => normalizeCaptureOptions({ url: "https://user:secret@example.test/" }), /must not contain credentials/);

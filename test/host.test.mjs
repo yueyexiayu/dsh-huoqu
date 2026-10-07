@@ -8,9 +8,12 @@ test("host entry registers huoqu tool and the declared route", async () => {
   apply({
     tools: { register(value) { tool = value; } },
     connection: { fetch: { register(value) { route = value; } } },
+    effect(fn) { return fn(); },
+    fs: { async resolve(value) { return { path: value }; }, processPath(target) { return target.path; }, async contains(root, target) { return target.path === root.path || target.path.startsWith(root.path + "/"); } },
+    sandboxPolicy: { resolve() { return { mode: "danger-full-access", workspaceRoot: "/tmp" }; } },
   });
   assert.equal(name, "huoqu");
-  assert.deepEqual(inject, ["tools", "connection"]);
+  assert.deepEqual(inject, ["tools", "connection", "fs", "sandboxPolicy"]);
   assert.equal(tool.name, "huoqu");
   assert.deepEqual(tool.parameters.required, ["url"]);
   assert.equal(tool.output.schema.properties.localPage.type, "object");
@@ -30,6 +33,9 @@ test("host entry registers huoqu tool and the declared route", async () => {
   const rendered = tool.output.render({}, { ok: false, status: "partial", indexHtml: "/tmp/huoqu/index.html", warnings: ["index.html 有图片未加载"] });
   assert.match(rendered[0].text, /网页已保存，但离线检查未完全通过/);
   assert.doesNotMatch(rendered[0].text, /副本已生成并通过离线检查/);
-  assert.match(rendered[0].text, /保留原站脚本和组件/);
+  assert.match(rendered[0].text, /静态渲染副本/);
+  assert.doesNotMatch(rendered[0].text, /保留原站脚本和组件/);
+  assert.match(tool.description, /static rendered/);
+  assert.doesNotMatch(tool.description, /retaining scripts/);
   assert.match(rendered[0].text, /图片未加载/);
 });

@@ -1,8 +1,130 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import vm from "node:vm";
 
 const clientPath = new URL("../lib/client.js", import.meta.url);
+
+// A small deterministic hooks runner executes the shipped Client code, including
+// mount effects, async requests and handlers. It is not a real browser acceptance test.
+function mountClient(source, fetch) {
+  let api, pane, cursor = 0, mounted = false;
+  const hooks = [], effects = [], cleanup = [], timers = [];
+  const React = {
+    createElement(type, props, ...children) { return { type, props: props || {}, children: children.flat(Infinity) }; },
+    useState(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (value) => { hooks[index] = value; }]; },
+    useRef(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = { current: initial }; return hooks[index]; },
+    useEffect(fn) { cursor++; if (!mounted) effects.push(fn); },
+  };
+  vm.runInNewContext(source, {
+    window: { __ModuleLoader__: { load(definition) { api = definition.factory(() => React); } } },
+    document: { getElementById() { return null; }, createElement() { return {}; }, head: { appendChild() {} } },
+    fetch, setTimeout(fn) { timers.push(fn); },
+  });
+  api.apply({
+    effect(fn) { return fn(); }, sidebarRightTabs: { register() {} },
+    slots: { inject(_, fn) { return fn(); }, register(spec, component) { if (spec.name === "sidebar.right.pane.tab") pane = component; } },
+  });
+  return {
+    render() {
+      cursor = 0;
+      const node = pane();
+      if (!mounted) { mounted = true; for (const effect of effects) cleanup.push(effect()); }
+      return node;
+    },
+    unmount() { for (const fn of cleanup) fn?.(); },
+    async drain() { await new Promise(setImmediate); },
+  };
+}
+function walk(node, predicate, found = []) {
+  if (!node || typeof node !== "object") return found;
+  if (predicate(node)) found.push(node);
+  for (const child of node.children || []) walk(child, predicate, found);
+  return found;
+}
+function text(node) { return typeof node === "string" ? node : (node?.children || []).map(text).join(" "); }
+
+test("mount recovers an existing job, cancel is explicit, and remount restores partial results", async () => {
+  const source = await readFile(clientPath, "utf8");
+  const requests = [];
+  const job = { jobId: "persisted-job", status: "running", url: "https://example.test/", outputDir: "/tmp/fixture" };
+  const fetch = async (url, options) => {
+    requests.push([url, options]);
+    const body = options.body ? JSON.parse(options.body) : null;
+    if (body?.action === "cancel") { assert.equal(body.jobId, job.jobId); job.status = "cancelled"; job.error = "采集已取消"; }
+    const result = url.includes("?jobId=") || body ? { ok: true, ...job } : { ok: true, jobs: [{ ...job }] };
+    return new Response(JSON.stringify(result));
+  };
+  const first = mountClient(source, fetch);
+  first.render(); await first.drain();
+  let tree = first.render();
+  assert.match(text(tree), /running/);
+  assert.match(text(tree), /静态渲染副本/);
+  assert.doesNotMatch(text(tree), /保留原站脚本和组件/);
+  const cancel = walk(tree, (node) => node.type === "button" && node.children.includes("取消采集"))[0];
+  assert.ok(cancel);
+  await cancel.props.onClick(); await first.drain();
+  tree = first.render();
+  assert.match(text(tree), /采集已取消/);
+  assert.equal(requests.filter(([, options]) => options.body && JSON.parse(options.body).action === "cancel").length, 1);
+  first.unmount();
+  job.status = "partial";
+  job.result = { ok: false, status: "partial", title: "Recovered capture", warnings: ["离线图片未加载"], indexHtml: "/tmp/fixture/index.html" };
+  const second = mountClient(source, fetch);
+  second.render(); await second.drain();
+  tree = second.render();
+  assert.match(text(tree), /Recovered capture/);
+  assert.match(text(tree), /partial · https:\/\/example.test\//);
+  assert.doesNotMatch(text(tree), /completed/);
+  assert.match(text(tree), /离线检查未完全通过/);
+  assert.doesNotMatch(text(tree), /已生成并通过离线检查/);
+  assert.ok(walk(tree, (node) => node.type === "button" && node.children.includes("打开本地页面")).length);
+  second.unmount();
+});
+
+for (const outcome of ["resolve", "reject"]) {
+  test(`late cancel ${outcome} for A cannot overwrite newly selected B`, async () => {
+    const source = await readFile(clientPath, "utf8");
+    let resolveCancel, rejectCancel;
+    const delayed = new Promise((resolve, reject) => { resolveCancel = resolve; rejectCancel = reject; });
+    const jobs = [
+      { jobId: "A", status: "running", url: "https://example.test/A", outputDir: "/tmp/A" },
+      { jobId: "B", status: "partial", url: "https://example.test/B", outputDir: "/tmp/B", result: { ok: false, status: "partial", title: "Selected B result", indexHtml: "/tmp/B/index.html", warnings: [] } },
+    ];
+    const opened = [];
+    const fetch = async (url, options) => {
+      const body = options.body ? JSON.parse(options.body) : null;
+      if (body?.action === "cancel") { assert.equal(body.jobId, "A"); return delayed; }
+      if (body?.action === "open") { opened.push(body.jobId); return new Response(JSON.stringify({ ok: true })); }
+      const id = new URL(url, "http://fixture.local").searchParams.get("jobId");
+      return new Response(JSON.stringify(id ? { ok: true, ...jobs.find((job) => job.jobId === id) } : { ok: true, jobs }));
+    };
+    const client = mountClient(source, fetch);
+    try {
+      client.render(); await client.drain();
+      let tree = client.render();
+      const cancel = walk(tree, (node) => node.type === "button" && node.children.includes("取消采集"))[0];
+      assert.ok(cancel);
+      const cancelling = cancel.props.onClick();
+      const selectB = walk(tree, (node) => node.type === "button" && node.children.includes("partial · https://example.test/B"))[0];
+      assert.ok(selectB);
+      selectB.props.onClick(); await client.drain();
+      assert.match(text(client.render()), /Selected B result/);
+      if (outcome === "resolve") {
+        jobs[0].status = "cancelled";
+        resolveCancel(new Response(JSON.stringify({ ok: true, ...jobs[0] })));
+      } else rejectCancel(new Error("stale A cancel failure"));
+      await cancelling; await client.drain();
+      tree = client.render();
+      assert.match(text(tree), /Selected B result/);
+      assert.doesNotMatch(text(tree), /stale A cancel failure/);
+      const open = walk(tree, (node) => node.type === "button" && node.children.includes("打开本地页面"))[0];
+      assert.ok(open);
+      await open.props.onClick();
+      assert.deepEqual(opened, ["B"]);
+    } finally { client.unmount(); }
+  });
+}
 
 test("sidebar folder button calls the native folder picker API action", async () => {
   const source = await readFile(clientPath, "utf8");

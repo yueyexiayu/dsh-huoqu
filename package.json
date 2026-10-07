@@ -1,6 +1,6 @@
 {
   "name": "huoqu",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "DSH plugin: capture rendered webpages into local offline HTML and MHTML copies.",
   "type": "module",

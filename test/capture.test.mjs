@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
+import { EventEmitter } from "node:events";
+import childProcess from "node:child_process";
 
 // Exercise the existing transaction directly without starting a browser.
 import { capturePage, createOutputStage, finalizeStage } from "../lib/capture.js";
@@ -109,3 +111,192 @@ test("cancelled capture rejects without creating or modifying the requested outp
     assert.deepEqual(await fs.readdir(dir), []);
   });
 });
+
+test("output guard denies directory creation before any mutation", async () => {
+  await temporaryDirectory(async (dir) => {
+    const output = path.join(dir, "denied");
+    const access = { assertWrite: async (...paths) => {
+      assert.deepEqual(paths, [output]);
+      throw new Error("POLICY_DENIED");
+    } };
+    await assert.rejects(createOutputStage(output, access), /POLICY_DENIED/);
+    assert.deepEqual(await fs.readdir(dir), []);
+  });
+});
+
+test("transaction guards both rename endpoints and policy rejection restores old files", async () => {
+  await temporaryDirectory(async (dir) => {
+    await previousCapture(dir);
+    const stage = await createOutputStage(dir);
+    await fs.writeFile(path.join(stage, "index.html"), "new page");
+    const checks = [];
+    const access = { assertWrite: async (...paths) => {
+      checks.push(paths);
+      if (paths[0] === path.join(stage, "index.html")) throw new Error("PROMOTION_POLICY_DENIED");
+    } };
+    await assert.rejects(finalizeStage(stage, dir, access), /PROMOTION_POLICY_DENIED/);
+    assert.equal(await fs.readFile(path.join(dir, "index.html"), "utf8"), "original page");
+    assert.ok(checks.some(([from, to]) => from === path.join(dir, "index.html") && to?.includes(".huoqu-replaced-")));
+    assert.ok(checks.some(([from, to]) => from.includes(".huoqu-replaced-") && to === path.join(dir, "index.html")));
+    assert.ok(checks.some(([from, to]) => from === path.join(stage, "index.html") && to === path.join(dir, "index.html")));
+  });
+});
+
+// Import the actual capture implementation; substitute only browser I/O and
+// rendering waits, keeping capturePage, cleanup, filesystem and locks intact.
+async function captureHarness() {
+  const moduleUrl = new URL("../lib/capture.js", import.meta.url);
+  const source = (await fs.readFile(moduleUrl, "utf8")).replace(/from "(\.\.?\/[^\"]+)"/g,
+    (_, relative) => `from ${JSON.stringify(new URL(relative, moduleUrl).href)}`);
+  const hooks = `\nexport { openChrome, stopChrome, OUTPUT_LOCKS };
+    export function useLaunch(reserve) {
+      chromePath = async () => '/fixture/chrome';
+      reservePort = reserve;
+      delay = async () => {};
+    }
+    export function useBrowser(browser) {
+      openBrowser = async () => browser;
+      delay = async () => {};
+      settlePage = async () => ({ scrollHeight: 100, scrollSteps: 1 });
+      waitForNetworkQuiet = async () => {};
+    }`;
+  return import(`data:text/javascript;base64,${Buffer.from(source + hooks).toString("base64")}#${Math.random()}`);
+}
+
+function fixtureBrowser({ closeError, navigationError } = {}) {
+  const html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`;
+  const state = { closes: 0, navigations: 0 };
+  const browser = {
+    mode: "extension",
+    close: async () => { state.closes++; if (closeError) throw new Error(closeError); },
+    cdp: {
+      onEvent: () => () => {},
+      waitForEvent: async () => ({}),
+      send: async (method, params) => {
+        if (method === "Target.createTarget") return { targetId: "fixture" };
+        if (method === "Target.attachToTarget") return { sessionId: "fixture" };
+        if (method === "Target.closeTarget") throw new Error("unsupported by extension");
+        if (method === "Page.navigate") { state.navigations++; if (navigationError) throw new Error(navigationError); }
+        if (method === "Page.captureScreenshot") return { data: Buffer.from("fixture image").toString("base64") };
+        if (method === "Runtime.evaluate") {
+          const summary = { url: "https://example.test/", title: "Fixture", viewport: { width: 1440, height: 1000 },
+            document: { width: 1440, height: 1000, htmlBytes: html.length, textLength: 1600 },
+            images: [], stylesheets: [], scripts: 0 };
+          return { result: { value: params.expression.includes("textSample:") ? summary : html } };
+        }
+        return {};
+      },
+    },
+  };
+  return { browser, state };
+}
+
+test("cleanup failure rejects a fully rendered capture before report or promotion and releases its lock", async () => {
+  await temporaryDirectory(async (dir) => {
+    await previousCapture(dir);
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser({ closeError: "CLOSE_REJECTED" });
+    mod.useBrowser(browser);
+    await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: dir }), /CLOSE_REJECTED/);
+    assert.equal(state.navigations, 3, "source and both previews ran before cleanup");
+    assert.equal(state.closes, 1);
+    assert.equal(await fs.readFile(path.join(dir, "index.html"), "utf8"), "original page");
+    assert.equal(JSON.parse(await fs.readFile(path.join(dir, "report.json"), "utf8")).status, undefined);
+    assert.ok(!(await fs.readdir(dir)).some((name) => name.startsWith(".huoqu-")));
+    assert.equal(mod.OUTPUT_LOCKS.size, 0);
+    const retry = fixtureBrowser();
+    mod.useBrowser(retry.browser);
+    const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir });
+    assert.equal(result.status, "completed");
+    assert.equal(retry.state.closes, 1);
+  });
+});
+
+test("capture error and browser cleanup error both survive, with stage and lock released", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser({ navigationError: "SOURCE_FAILED", closeError: "CLOSE_FAILED" });
+    mod.useBrowser(browser);
+    await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: dir }), (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /SOURCE_FAILED/);
+      assert.match(error.message, /CLOSE_FAILED/);
+      assert.equal(error.cause.message, "SOURCE_FAILED");
+      return true;
+    });
+    assert.equal(state.closes, 1);
+    assert.deepEqual(await fs.readdir(dir), []);
+    assert.equal(mod.OUTPUT_LOCKS.size, 0);
+  });
+});
+
+test("Chrome termination timeout rejects and preserves a profile still used by its process", async () => {
+  await temporaryDirectory(async (profile) => {
+    const mod = await captureHarness();
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.pid = 12345;
+    const signals = [];
+    child.kill = (signal) => { signals.push(signal); return false; };
+    await fs.writeFile(path.join(profile, "sentinel"), "preserved");
+    const originalKill = process.kill;
+    process.kill = (_pid, signal) => { signals.push(signal); return false; };
+    try {
+      await assert.rejects(mod.stopChrome({ child, profile }), (error) => {
+        assert.match(error.message, /退出超时/);
+        assert.ok(error.message.includes(profile));
+        return true;
+      });
+    } finally { process.kill = originalKill; }
+    assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+    assert.equal(await fs.readFile(path.join(profile, "sentinel"), "utf8"), "preserved");
+    assert.equal(child.listenerCount("exit"), 0);
+    assert.equal(child.listenerCount("error"), 0);
+  });
+});
+
+for (const failure of ["reserve", "spawn-sync", "spawn-event"]) {
+  test(`Chrome startup ${failure} failure is reported and its unused profile removed`, async () => {
+    await temporaryDirectory(async (dir) => {
+      const mod = await captureHarness();
+      const originalTmpdir = os.tmpdir;
+      const originalSpawn = childProcess.spawn;
+      const originalFetch = globalThis.fetch;
+      const eventErrors = [];
+      let createdProfile = false;
+      os.tmpdir = () => dir;
+      childProcess.spawn = () => {
+        if (failure === "spawn-sync") throw new Error("SPAWN_SYNC_FAILED");
+        const child = new EventEmitter();
+        child.exitCode = null;
+        child.signalCode = null;
+        child.kill = () => { throw new Error("must not signal a child without a PID"); };
+        queueMicrotask(() => {
+          try { child.emit("error", new Error("SPAWN_EVENT_FAILED")); }
+          catch (error) { eventErrors.push(error); }
+        });
+        return child;
+      };
+      globalThis.fetch = async () => ({ ok: false });
+      syncBuiltinESMExports();
+      mod.useLaunch(async () => {
+        createdProfile = (await fs.readdir(dir)).some((name) => name.startsWith("dsh-huoqu-chrome-"));
+        if (failure === "reserve") throw new Error("RESERVE_FAILED");
+        return 12345;
+      });
+      try {
+        const expected = { reserve: /RESERVE_FAILED/, "spawn-sync": /SPAWN_SYNC_FAILED/, "spawn-event": /SPAWN_EVENT_FAILED/ }[failure];
+        await assert.rejects(mod.openChrome({}), expected);
+        assert.equal(createdProfile, true, "failure happens after profile creation");
+        assert.deepEqual(eventErrors, [], "spawn error must have an immediate listener");
+        assert.deepEqual(await fs.readdir(dir), [], "failed startup must remove the unused profile");
+      } finally {
+        os.tmpdir = originalTmpdir;
+        childProcess.spawn = originalSpawn;
+        globalThis.fetch = originalFetch;
+        syncBuiltinESMExports();
+      }
+    });
+  });
+}
