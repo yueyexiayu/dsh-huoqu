@@ -42,6 +42,8 @@ hook.deregister();
 let tool, route, dispose;
 let mode = "danger-full-access";
 const policyRequests = [];
+const sessions = new Map();
+const sessionModes = new Map();
 const fsTargets = [];
 apply({
   tools: { register(value) { tool = value; } },
@@ -52,7 +54,11 @@ apply({
     processPath(target) { return target.path; },
     async contains(root, target) { return target.path === root.path || target.path.startsWith(root.path + "/"); },
   },
-  sandboxPolicy: { resolve(request) { policyRequests.push(request); return { mode, workspaceRoot: "/tmp" }; } },
+  sandboxPolicy: { resolve(request) {
+    policyRequests.push(request);
+    return { mode: request.session ? (sessionModes.get(request.session.id) || mode) : mode, workspaceRoot: "/tmp" };
+  } },
+  sessions: { get(id) { return sessions.get(id); } },
 });
 const post = (body, signal) => route.fetch(new Request("http://dsh.local/api/huoqu", {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal,
@@ -107,6 +113,43 @@ test("HTTP rejects read-only policy and permission overrides before starting", a
     const override = await post({ url: "https://example.test/good", sandbox_permissions: "danger-full-access" });
     assert.equal(override.status, 400);
   } finally { mode = "danger-full-access"; }
+});
+
+test("sidebar capture uses the loaded conversation policy instead of deployment workspace-write", async () => {
+  const full = { id: "conversation-full" };
+  const limited = { id: "conversation-limited" };
+  sessions.set(full.id, full);
+  sessions.set(limited.id, limited);
+  sessionModes.set(full.id, "danger-full-access");
+  sessionModes.set(limited.id, "workspace-write");
+  const previous = mode;
+  mode = "workspace-write";
+  try {
+    const missing = await post({ url: "https://example.test/good", output_dir: "/Users/ning/Downloads", sessionId: "missing" });
+    assert.equal(missing.status, 403);
+    assert.match((await missing.json()).error, /不会回落到/);
+    const malformed = await post({ url: "https://example.test/good", sessionId: 12 });
+    assert.equal(malformed.status, 400);
+
+    const denied = await post({ url: "https://example.test/good", output_dir: "/Users/ning/Downloads", sessionId: limited.id });
+    assert.equal(denied.status, 403);
+    assert.match((await denied.json()).error, /cannot modify "\/Users\/ning\/Downloads"/);
+
+    const before = policyRequests.length;
+    const started = await post({ url: "https://example.test/good", output_dir: "/Users/ning/Downloads", sessionId: full.id });
+    assert.equal(started.status, 202);
+    const job = await started.json();
+    const done = await settled(job.jobId);
+    assert.equal(done.status, "completed");
+    assert.equal(done.result.title, `huoqu-job:${job.jobId}`);
+    const seen = policyRequests.slice(before);
+    assert.ok(seen.length >= 2);
+    assert.ok(seen.every((request) => request.session === full));
+  } finally {
+    mode = previous;
+    sessions.clear();
+    sessionModes.clear();
+  }
 });
 
 test("native open allows completed and partial results, and reports nonzero exit", { skip: process.platform !== "darwin" }, async () => {

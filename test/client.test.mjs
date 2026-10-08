@@ -19,16 +19,16 @@ function mountClient(source, fetch) {
   vm.runInNewContext(source, {
     window: { __ModuleLoader__: { load(definition) { api = definition.factory(() => React); } } },
     document: { getElementById() { return null; }, createElement() { return {}; }, head: { appendChild() {} } },
-    fetch, setTimeout(fn) { timers.push(fn); },
+    fetch, URL, setTimeout(fn) { timers.push(fn); },
   });
   api.apply({
     effect(fn) { return fn(); }, sidebarRightTabs: { register() {} },
     slots: { inject(_, fn) { return fn(); }, register(spec, component) { if (spec.name === "sidebar.right.pane.tab") pane = component; } },
   });
   return {
-    render() {
+    render(props) {
       cursor = 0;
-      const node = pane();
+      const node = pane(props);
       if (!mounted) { mounted = true; for (const effect of effects) cleanup.push(effect()); }
       return node;
     },
@@ -301,9 +301,40 @@ test("sidebar folder button calls the native folder picker API action", async ()
     await button.props.onClick();
     assert.equal(requestUrl, "/api/huoqu");
     assert.equal(JSON.parse(requestOptions.body).action, "choose-folder");
+    assert.match(text(pane()), /未关联当前会话/);
   } finally {
     globalThis.document = previous.document;
     globalThis.window = previous.window;
     globalThis.fetch = previous.fetch;
   }
+});
+
+test("sidebar capture sends the current conversation sessionId", async () => {
+  const bodies = [];
+  const client = mountClient(await readFile(clientPath, "utf8"), async (url, options) => {
+    const body = options?.body ? JSON.parse(options.body) : null;
+    if (body) bodies.push(body);
+    if (body?.action === "capture") return response({ ok: true, jobId: "job-1", status: "queued", outputDir: "/tmp/out" });
+    if (String(url).includes("jobId=")) {
+      return response({ ok: true, jobId: "job-1", status: "completed", url: "https://example.test/page", outputDir: "/tmp/out",
+        result: { ok: true, title: "done", indexHtml: "/tmp/out/index.html", warnings: [] } });
+    }
+    return response({ ok: true, jobs: [] });
+  });
+  try {
+    client.render({ sessionId: "sess-1" });
+    await client.drain();
+    let tree = client.render({ sessionId: "sess-1" });
+    assert.doesNotMatch(text(tree), /未关联当前会话/);
+    const urlInput = walk(tree, (node) => node.type === "input" && node.props.type === "url")[0];
+    assert.ok(urlInput, "url field missing");
+    urlInput.props.onChange({ target: { value: "https://example.test/page" } });
+    tree = client.render({ sessionId: "sess-1" });
+    const form = walk(tree, (node) => node.type === "form")[0];
+    assert.ok(form?.props.onSubmit, "capture form missing");
+    await form.props.onSubmit({ preventDefault() {} });
+    await client.drain();
+    const capture = bodies.find((body) => body.action === "capture");
+    assert.equal(capture?.sessionId, "sess-1");
+  } finally { client.unmount(); }
 });

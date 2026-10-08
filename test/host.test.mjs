@@ -13,7 +13,7 @@ test("host entry registers huoqu tool and the declared route", async () => {
     sandboxPolicy: { resolve() { return { mode: "danger-full-access", workspaceRoot: "/tmp" }; } },
   });
   assert.equal(name, "huoqu");
-  assert.deepEqual(inject, ["tools", "connection", "fs", "sandboxPolicy"]);
+  assert.deepEqual(inject, ["tools", "connection", "fs", "sandboxPolicy", "sessions"]);
   assert.equal(tool.name, "huoqu");
   assert.deepEqual(tool.parameters.required, ["url"]);
   assert.equal(tool.output.schema.properties.localPage.type, "object");
