@@ -43,6 +43,110 @@ function walk(node, predicate, found = []) {
   return found;
 }
 function text(node) { return typeof node === "string" ? node : (node?.children || []).map(text).join(" "); }
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+function button(tree, label) {
+  const found = walk(tree, (node) => node.type === "button" && text(node).includes(label))[0];
+  assert.ok(found, `missing button: ${label}`);
+  return found;
+}
+function response(value) { return new Response(JSON.stringify(value)); }
+async function raceFixture() {
+  const jobs = ["A", "B"].map((id) => ({ jobId: id, status: "completed", url: `https://example.test/${id}`, outputDir: `/tmp/${id}`,
+    result: { ok: true, title: `Result ${id}`, indexHtml: `/tmp/${id}/index.html`, warnings: [] } }));
+  const pending = { list: [], folder: null, open: null, runningB: false };
+  const client = mountClient(await readFile(clientPath, "utf8"), async (url, options) => {
+    const action = options.body ? JSON.parse(options.body).action : null;
+    if (action === "choose-folder") return pending.folder.promise;
+    if (action === "open") return pending.open.promise;
+    const id = new URL(url, "http://fixture.local").searchParams.get("jobId");
+    if (id) return response({ ok: true, ...jobs.find((job) => job.jobId === id), ...(id === "B" && pending.runningB ? { status: "running" } : {}) });
+    return pending.list.length ? pending.list.shift().promise : response({ ok: true, jobs });
+  });
+  client.render(); await client.drain();
+  return { client, pending, jobs };
+}
+
+test("older list success cannot replace a newer refresh", async () => {
+  const { client, pending, jobs } = await raceFixture();
+  const older = deferred(), newer = deferred(); pending.list.push(older, newer);
+  button(client.render(), "刷新任务列表").props.onClick();
+  button(client.render(), "刷新任务列表").props.onClick();
+  newer.resolve(response({ ok: true, jobs: [jobs[1]] })); await client.drain();
+  older.resolve(response({ ok: true, jobs: [jobs[0]] })); await client.drain();
+  const history = walk(client.render(), (node) => node.type === "button" && String(node.props.className).includes("huoqu-path"));
+  assert.deepEqual(history.map(text), ["completed · https://example.test/B"]);
+  client.unmount();
+});
+
+test("old list failure cannot contaminate newly selected job", async () => {
+  const { client, pending } = await raceFixture();
+  const older = deferred(); pending.list.push(older);
+  button(client.render(), "刷新任务列表").props.onClick();
+  button(client.render(), "https://example.test/B").props.onClick(); await client.drain();
+  older.reject(new Error("stale list failure")); await client.drain();
+  assert.doesNotMatch(text(client.render()), /stale list failure/);
+  assert.match(text(client.render()), /Result B/);
+  client.unmount();
+});
+
+for (const outcome of ["resolve", "cancel", "reject"]) {
+  test(`late folder ${outcome} cannot overwrite selected running job`, async () => {
+    const { client, pending } = await raceFixture();
+    pending.folder = deferred();
+    const choosing = button(client.render(), "选择文件夹").props.onClick();
+    pending.runningB = true;
+    button(client.render(), "https://example.test/B").props.onClick(); await client.drain();
+    if (outcome === "reject") pending.folder.reject(new Error("stale folder failure"));
+    else pending.folder.resolve(response({ ok: true, cancelled: outcome === "cancel", outputDir: "/tmp/stale-folder" }));
+    await choosing; await client.drain();
+    const tree = client.render();
+    assert.equal(walk(tree, (node) => node.type === "input")[1].props.value, "/tmp/B");
+    assert.match(text(tree), /任务状态：running/);
+    assert.doesNotMatch(text(tree), /stale folder failure|已选择输出目录/);
+    assert.equal(button(tree, "选择文件夹").props.disabled, true);
+    client.unmount();
+  });
+}
+
+test("old open failure cannot contaminate newly selected job", async () => {
+  const { client, pending } = await raceFixture();
+  pending.open = deferred();
+  button(client.render(), "打开本地页面").props.onClick();
+  button(client.render(), "https://example.test/B").props.onClick(); await client.drain();
+  pending.open.reject(new Error("stale open failure")); await client.drain();
+  assert.doesNotMatch(text(client.render()), /stale open failure/);
+  assert.match(text(client.render()), /Result B/);
+  client.unmount();
+});
+
+for (const action of ["list", "folder", "open"]) {
+  test(`current ${action} failure remains visible`, async () => {
+    const { client, pending } = await raceFixture();
+    const request = deferred();
+    if (action === "list") pending.list.push(request);
+    else pending[action] = request;
+    button(client.render(), { list: "刷新任务列表", folder: "选择文件夹", open: "打开本地页面" }[action]).props.onClick();
+    request.reject(new Error(`current ${action} failure`)); await client.drain();
+    assert.match(text(client.render()), new RegExp(`current ${action} failure`));
+    if (action === "folder") assert.equal(button(client.render(), "选择文件夹").props.disabled, false);
+    client.unmount();
+  });
+}
+
+test("folder completion after unmount cannot change component state", async () => {
+  const { client, pending } = await raceFixture();
+  pending.folder = deferred();
+  const choosing = button(client.render(), "选择文件夹").props.onClick();
+  const before = JSON.stringify(client.render());
+  client.unmount();
+  pending.folder.resolve(response({ ok: true, cancelled: false, outputDir: "/tmp/late-folder" }));
+  await choosing; await client.drain();
+  assert.equal(JSON.stringify(client.render()), before);
+});
 
 test("mount recovers an existing job, cancel is explicit, and remount restores partial results", async () => {
   const source = await readFile(clientPath, "utf8");

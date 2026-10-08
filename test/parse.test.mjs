@@ -53,6 +53,16 @@ test("normalizeCaptureOptions validates viewport and output path", () => {
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test", output_dir: "/" }), /dedicated project folder/);
 });
 
+test("offline preview accepts meaningful short HTML without an absolute markup threshold", () => {
+  // Real Chrome MHTML preview: 994 HTML characters, the full 211-character text.
+  const page = { title: "Huoqu resolution basic", document: { htmlBytes: 994, textLength: 211 }, images: [{ loaded: true }, { loaded: true }] };
+  assert.deepEqual(offlinePreviewIssues(page, "index.mhtml"), []);
+  assert.match(offlinePreviewIssues({ ...page, document: { htmlBytes: 994, textLength: 0 } }, "index.mhtml")[0], /内容不足/);
+  assert.match(offlinePreviewIssues({ ...page, title: "Just a moment..." }, "index.mhtml").join("\n"), /人机验证/);
+  assert.match(offlinePreviewIssues({ ...page, title: "Access Denied" }, "index.mhtml").join("\n"), /拒绝/);
+  assert.match(offlinePreviewIssues({ ...page, images: [{ loaded: false }] }, "index.mhtml").join("\n"), /图片未加载/);
+});
+
 test("offline preview rejects blank, blocked and broken-image pages", () => {
   const page = { document: { htmlBytes: 1500, textLength: 100 }, images: [{ loaded: true }] };
   assert.deepEqual(offlinePreviewIssues(page, "index.html"), []);

@@ -303,12 +303,95 @@ test("SVG presentation URL attributes are discovered and localized in the main p
   const saved = materializeMhtml(htmlToMhtml(html, "https://example.test/"), [{
     url: "https://example.test/effects.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><linearGradient id="paint"/><clipPath id="clip"/></svg>'),
   }]);
-  assert.match(saved.html, /fill="url\(&quot;\.\/assets\/001-effects.svg#paint&quot;\)"/);
-  assert.match(saved.html, /clip-path="url\(&quot;\.\/assets\/001-effects.svg#clip&quot;\)"/);
+  assert.match(saved.html, /fill="url\(#huoqu-svg-1-1\)"/);
+  assert.match(saved.html, /clip-path="url\(#huoqu-svg-1-2\)"/);
   assert.match(saved.html, /stroke="url\(&quot;#local&quot;\)"/);
   assert.deepEqual(saved.externalReferences, []);
   const archiveHtml = parseMhtml(buildMhtml(saved, "https://example.test/")).main.text;
-  assert.match(archiveHtml, /fill="url\(&quot;cid:huoqu-1#paint&quot;\)"/);
+  assert.match(archiveHtml, /fill="url\(&quot;#huoqu-svg-1-1&quot;\)"/);
+});
+
+test("SVG paint URLs inline definitions across attributes and stylesheet origins", () => {
+  const html = '<html><head><link rel="stylesheet" media="screen" href="/css/site.css"><style>.embedded{fill:url(/effects.svg#paint)}</style></head><body><div id="huoqu-svg-1-1"></div><svg><rect fill="url(/effects.svg#paint)" style="stroke:url(/effects.svg#paint)"/><rect class="external"/></svg></body></html>';
+  const saved = materializeMhtml(htmlToMhtml(html, "https://example.test/"), [
+    { url: "https://example.test/effects.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><defs><linearGradient id="base"><stop stop-color="red"/></linearGradient><linearGradient id="paint" href="#base"/></defs></svg>') },
+    { url: "https://example.test/css/site.css", mime: "text/css", bytes: Buffer.from('.external{fill:url(../effects.svg#paint);background:url(../picture.png)}') },
+    { url: "https://example.test/picture.png", mime: "image/png", bytes: Buffer.from("png") },
+  ]);
+  assert.match(saved.html, /<style media="screen">/);
+  assert.doesNotMatch(saved.html, /001-effects.svg#paint/);
+  const ids = [...saved.html.matchAll(/\sid="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(ids.length, new Set(ids).size);
+  for (const match of saved.html.matchAll(/url\(#([^)]*)\)/g)) assert.ok(ids.includes(match[1]));
+  assert.match(saved.html, /<linearGradient id="huoqu-svg-2-2" href="#huoqu-svg-2-1"/);
+  assert.match(saved.html, /background:url\("\.\/assets\/003-picture.png"\)/);
+  assert.doesNotMatch(saved.html, /href="\.\/assets\/002-site.css"/);
+});
+
+test("SVG paint missing and active targets remain observable, never fabricated", () => {
+  const saved = materializeMhtml(htmlToMhtml('<svg><rect fill="url(/missing.svg#absent)"/><rect fill="url(/active.svg#paint)"/></svg>', "https://example.test/"), [
+    { url: "https://example.test/missing.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><linearGradient id="other"/></svg>') },
+    { url: "https://example.test/active.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg onload="danger()"><linearGradient id="paint"/><script>danger()</script></svg>') },
+  ]);
+  assert.match(saved.html, /001-missing.svg#absent/);
+  assert.match(saved.html, /002-active.svg#paint/);
+  assert.doesNotMatch(saved.html, /danger|id="huoqu-svg-/);
+});
+
+test("SVG paint follows captured stylesheet imports and cross-file gradient dependencies", () => {
+  const saved = materializeMhtml(htmlToMhtml('<link rel="stylesheet" href="/css/site.css"><svg><rect class="paint"/></svg>', "https://example.test/"), [
+    { url: "https://example.test/css/site.css", mime: "text/css", bytes: Buffer.from('@import "nested.css" screen; .other{background-image:url(../paint.svg#jade)}') },
+    { url: "https://example.test/css/nested.css", mime: "text/css", bytes: Buffer.from('.paint{fill:url(../paint.svg#jade)} .paint:before{content:"</style><script>bad()</script>"}') },
+    { url: "https://example.test/paint.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><linearGradient id="jade" href="base.svg#green"/></svg>') },
+    { url: "https://example.test/base.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><linearGradient id="green"><stop stop-color="green"/></linearGradient></svg>') },
+  ]);
+  assert.match(saved.html, /@media screen\{.paint\{fill:url\(#huoqu-svg-1-1\)\}/);
+  assert.match(saved.html, /id="huoqu-svg-1-1" href="#huoqu-svg-2-1"/);
+  assert.match(saved.html, /background-image:url\("\.\/assets\/003-paint.svg#jade"\)/);
+  assert.doesNotMatch(saved.html, /<script|<\/style><script/);
+  assert.match(saved.html, /\\3c \/style>/);
+});
+
+test("Blink cid stylesheets resolve their relative paint URL against the document", () => {
+  const captured = fixture.replaceAll("https://example.test/css/site.css", "cid:blink-inline")
+    .replace("body { background: url(../img/logo.png); }", ".paint{fill:url(/paint.svg#jade)}");
+  const saved = materializeMhtml(captured, [{ url: "https://example.test/paint.svg", mime: "image/svg+xml", bytes: Buffer.from('<svg><linearGradient id="jade"/></svg>') }]);
+  assert.match(saved.html, /fill:url\(#huoqu-svg-1-1\)/);
+  assert.doesNotMatch(saved.html, /#jade#jade/);
+});
+
+test("active SVG event, foreignObject and duplicate IDs are not promoted into definitions", () => {
+  for (const source of ['<svg onload="bad()"><linearGradient id="jade"/></svg>', '<svg><foreignObject>active</foreignObject><linearGradient id="jade"/></svg>', '<svg><linearGradient id="jade"/><linearGradient id="jade"/></svg>']) {
+    const saved = materializeMhtml(htmlToMhtml('<svg><rect fill="url(/paint.svg#jade)"/></svg>', "https://example.test/"), [{ url: "https://example.test/paint.svg", mime: "image/svg+xml", bytes: Buffer.from(source) }]);
+    assert.match(saved.html, /001-paint.svg#jade/);
+    assert.doesNotMatch(saved.html, /huoqu-svg|onload|foreignObject/);
+  }
+});
+
+test("external SVG stylesheets are never promoted into the host document", () => {
+  const styles = [
+    '<style>body{background:red}rect,.host{fill:red}</style>',
+    '<style>#paint{color:red}</style>',
+    '<style>@import url(https://example.test/global.css);</style>',
+    '<style>@font-face{font-family:Host;src:url(font.woff2)}@keyframes host{to{opacity:0}}</style>',
+    '<svg:style xmlns:svg="http://www.w3.org/2000/svg">body{color:red}</svg:style>',
+    '<link rel="stylesheet" href="global.css"/>',
+  ];
+  for (const style of styles) {
+    const source = `<svg xmlns="http://www.w3.org/2000/svg">${style}<linearGradient id="paint"/><rect id="logo"/></svg>`;
+    const page = '<svg><rect fill="url(/styled.svg#paint)"/><use href="/styled.svg#logo"/><filter><feImage href="/styled.svg"/></filter></svg>';
+    const saved = materializeMhtml(htmlToMhtml(page, "https://example.test/"), [{ url: "https://example.test/styled.svg", mime: "image/svg+xml", bytes: Buffer.from(source) }]);
+    assert.match(saved.html, /styled.svg#paint/);
+    assert.match(saved.html, /<use href="\.\/assets\/001-styled.svg#logo"/);
+    assert.match(saved.html, /<feImage href="\.\/assets\/001-styled.svg"/);
+    assert.doesNotMatch(saved.html, /huoqu-svg|<style|<svg:style|<link|@font-face|@keyframes/);
+    // Preserve the original resource rather than stripping its CSS and pretending
+    // the now-different paint/icon was safely converted.
+    assert.match(saved.assets[0].bytes.toString("utf8"), /<(?:svg:)?(?:style|link)\b/);
+    const archiveHtml = parseMhtml(buildMhtml(saved, "https://example.test/")).main.text;
+    assert.doesNotMatch(archiveHtml, /<style|<svg:style|@font-face|@keyframes/);
+    assert.match(archiveHtml, /cid:huoqu-1#paint/);
+  }
 });
 
 test("image-set decodes CSS string escapes and preserves unchanged data URLs", () => {

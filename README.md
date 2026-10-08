@@ -16,7 +16,7 @@
 
 采集滚动页面以加载懒加载内容，不自动点击通用按钮，也不调用原站轮播或 fullpage 翻页 API。尚未渲染、需要点击或接口请求才能出现的内容可能缺失。源站在线加载仍会运行源站自身的脚本。
 
-普通外部 SVG 图标会内联以减少离线加载限制；含主动内容或复杂递归引用的 SVG 不强行改写。无法本地化或加载失败的资源会进入报告，不会静默视为通过。
+普通外部 SVG 图标和渐变、滤镜等 paint 定义会内联以减少离线加载限制，覆盖属性、内联 CSS、页面样式及捕获的普通外部样式表。含主动内容、重复 ID 或样式表（`style`、`link`、XML stylesheet）的 SVG 不晋升到宿主 DOM，避免污染整页；保留原外部引用，不通过删除样式伪造完整还原。复杂或不支持的引用不强行改写；无法本地化或离线加载失败会进入报告并返回 `partial`。
 
 输出目录必须为空，或能通过 `manifest.json`、`report.json` 及资源清单确认是既有 `huoqu` 副本。支持记录完整的旧版产物；无法确认归属时拒绝覆盖。不会仅凭 `index.html`、`assets/` 等文件名自动覆盖。替换失败时恢复旧内容；恢复失败则保留备份并报告位置。
 
@@ -51,6 +51,8 @@ macOS 打开本地文件会等待 `open` 的退出状态；失败会显示错误
 
 保留重定向资源的原始地址映射；补齐 CSS `image-set()`、独立 SVG 及 SVG 属性的资源发现和离线改写。额外下载最多尝试 120 个资源，读取字节共享 100 MiB 预算，失败响应也占用预算，耗尽后停止新请求。修复 IPv4 映射 IPv6 的私网识别，以及普通正文包含 “Just a moment” 时被误判为验证页的问题。静态化、权限、任务生命周期及清理修复见上述说明。
 
+补修覆盖外部 SVG paint 的依赖、ID 冲突与样式隔离；侧栏任务列表乱序、文件夹选择及打开操作的迟到响应不覆盖新任务状态。有效短 HTML 不再因不足 1000 字符被误报为 `partial`，空白文本、验证/拒绝页与丢图检查保持不变。
+
 ## 开发与验证
 
 当前 Host/桥接测试依赖同级 `chrome/` 中的配套插件。这是开发测试依赖；运行时无配套插件，采集仍可使用隔离 Chrome。
@@ -58,8 +60,8 @@ macOS 打开本地文件会等待 `open` 的退出状态；失败会显示错误
 ```bash
 for file in lib/*.js; do /usr/local/bin/node --check "$file" || exit; done
 /usr/local/bin/node --test test/*.test.mjs
-# 可选：真实隔离 Chrome 安全回归，不访问用户正式 Chrome
-HUOQU_BROWSER_TESTS=1 /usr/local/bin/node --test test/browser-security.test.mjs
+# 可选：全部回归，包含真实隔离 Chrome 安全与 SVG 像素测试，不访问用户正式 Chrome
+HUOQU_BROWSER_TESTS=1 /usr/local/bin/node --test test/*.test.mjs
 ```
 
 常规测试覆盖权限、任务取消/卸载/恢复、过期取消响应不覆盖新任务选择、参数规范化、资源限制、IPv6 私有地址、别名重定向、静态化、输出事务、Chrome 启动失败及清理失败。真实浏览器回归使用无害合成页面，检查自动业务按钮未触发、正常 MHTML 与快照失败的 HTML 回退均不执行本地文件读取脚本；嵌套 data 样式表在线生效、离线被 CSP 阻止且如实返回 `partial`，安全页面仍返回 `completed`。
