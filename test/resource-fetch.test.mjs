@@ -137,6 +137,35 @@ test("the final response is cancelled when it exceeds the remaining byte budget"
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("source 404 references are removed instead of left as offline failures", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("missing", { status: 404 });
+  try {
+    const { mhtml, initial, sourceUrl } = imageArchive(1);
+    const result = await completeExternalResources(mhtml, initial, sourceUrl);
+    assert.equal(result.materialized.externalReferences.length, 0);
+    assert.equal(result.materialized.html.includes("https://example.test/0.png"), false);
+    assert.ok(result.failures.some((failure) => failure.error === "HTTP 404"));
+    assert.equal(result.failures.some((failure) => failure.error.includes("remain unresolved")), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("an in-document video between 20 MiB and 64 MiB is downloaded", async () => {
+  const originalFetch = globalThis.fetch;
+  const bytes = new Uint8Array(30 * 1024 * 1024);
+  globalThis.fetch = async () => new Response(bytes, {
+    headers: { "content-type": "video/mp4", "content-length": String(bytes.length) },
+  });
+  try {
+    const html = "<html><body><video src=\"https://example.test/promo.mp4\"></video></body></html>";
+    const mhtml = htmlToMhtml(html, "https://example.test/");
+    const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), "https://example.test/");
+    assert.equal(result.resources.length, 1);
+    assert.equal(result.resources[0].bytes.length, bytes.length);
+    assert.equal(result.materialized.externalReferences.includes("https://example.test/promo.mp4"), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("cancelled completion rejects before initiating any resource request", async () => {
   const controller = new AbortController();
   controller.abort();
