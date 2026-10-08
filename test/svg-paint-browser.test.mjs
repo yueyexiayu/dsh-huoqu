@@ -44,12 +44,20 @@ function pngPixel(png, x, y) {
 
 // Real isolated Chrome; no file-origin relaxations and no user browser session.
 // Keep temporary captures as reproducible before/after pixel and network evidence.
-for (const rejectStyles of [false, true]) test(`isolated Chrome: external SVG paint ${rejectStyles ? "rejects stylesheet promotion without global pollution" : "renders identically in offline file HTML"}`,  { skip: process.env.HUOQU_BROWSER_TESTS !== "1", timeout: 120_000 }, async () => {
+for (const snapshotFailure of [false, true]) for (const rejectStyles of [false, true]) test(`isolated Chrome (${snapshotFailure ? "DOM fallback" : "MHTML snapshot"}): external SVG paint ${rejectStyles ? "rejects stylesheet promotion without global pollution" : "renders identically in offline file HTML"}`,  { skip: process.env.HUOQU_BROWSER_TESTS !== "1", timeout: 120_000 }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "huoqu-svg-paint-browser-"));
+  // A fresh module URL per case prevents a cached CDP hook from selecting the wrong mode.
+  const captureUrl = new URL(`../lib/capture.js?svg-paint=${snapshotFailure}-${rejectStyles}`, import.meta.url).href;
   const browserUrl = new URL("../../chrome/lib/browser.js", import.meta.url).href;
+  const injected = "const cdp = new ChromeDevTools(socket);";
+  const sendHook = `${injected} const originalSend = cdp.send.bind(cdp); cdp.send = (method, ...args) => method === 'Page.captureSnapshot' && ${snapshotFailure} ? Promise.reject(new Error('Synthetic SVG snapshot failure')) : originalSend(method, ...args);`;
   const hook = registerHooks({ load(url, context, next) {
     if (url === browserUrl) return { format: "module", shortCircuit: true, source: "export async function openCaptureSession() { throw new Error('Isolated regression browser only'); }" };
-    return next(url, context);
+    const result = next(url, context);
+    if (url !== captureUrl) return result;
+    const source = String(result.source);
+    assert.ok(source.includes(injected), "snapshot failure injection must target the real isolated CDP connection");
+    return { ...result, source: source.replace(injected, sendHook) };
   } });
   const server = createServer((req, res) => {
     if (req.url === "/paint.svg") {
@@ -65,7 +73,7 @@ for (const rejectStyles of [false, true]) test(`isolated Chrome: external SVG pa
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
-    const { capturePage } = await import("../lib/capture.js");
+    const { capturePage } = await import(captureUrl);
     const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/`, output_dir: path.join(dir, "capture"), width: 800, height: 600, wait_seconds: 0 });
     const report = JSON.parse(await readFile(path.join(dir, "capture/report.json"), "utf8"));
     const source = await readFile(path.join(dir, "capture/source.png"));
@@ -73,7 +81,9 @@ for (const rejectStyles of [false, true]) test(`isolated Chrome: external SVG pa
     const archive = await readFile(path.join(dir, "capture/archive-preview.png"));
     const sourcePixels = [25, 185, 345, 505].map(x => pngPixel(source, x, 150));
     const localPixels = [25, 185, 345, 505].map(x => pngPixel(local, x, 150));
-    console.log(JSON.stringify({ evidence: dir, rejectStyles, status: result.status, engine: report.browser.engine, network: report.offlineValidation, sourcePixels, localPixels, background: { source: pngPixel(source, 700, 500), local: pngPixel(local, 700, 500), archive: pngPixel(archive, 700, 500) }, sourceLocalPixelsIdentical: source.equals(local), sourceArchivePixelsIdentical: source.equals(archive) }));
+    console.log(JSON.stringify({ evidence: dir, snapshotFailure, rejectStyles, status: result.status, engine: report.browser.engine, network: report.offlineValidation, sourcePixels, localPixels, background: { source: pngPixel(source, 700, 500), local: pngPixel(local, 700, 500), archive: pngPixel(archive, 700, 500) }, sourceLocalPixelsIdentical: source.equals(local), sourceArchivePixelsIdentical: source.equals(archive) }));
+    if (snapshotFailure) assert.match(result.warnings.join("\n"), /Synthetic SVG snapshot failure/, "fallback must actually bypass Page.captureSnapshot");
+    else assert.doesNotMatch(result.warnings.join("\n"), /Synthetic SVG snapshot failure/);
     for (const [red, green, blue] of sourcePixels) assert.ok(green > red + 40 && green > blue, "live source must actually paint all four green gradients");
     if (rejectStyles) {
       assert.equal(result.status, "partial", "refused SVG promotion must not masquerade as completed");

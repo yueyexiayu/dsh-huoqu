@@ -6,6 +6,7 @@ import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { EventEmitter } from "node:events";
 import childProcess from "node:child_process";
+import vm from "node:vm";
 
 // Exercise the existing transaction directly without starting a browser.
 import { capturePage, createOutputStage, finalizeStage } from "../lib/capture.js";
@@ -148,7 +149,7 @@ async function captureHarness() {
   const moduleUrl = new URL("../lib/capture.js", import.meta.url);
   const source = (await fs.readFile(moduleUrl, "utf8")).replace(/from "(\.\.?\/[^\"]+)"/g,
     (_, relative) => `from ${JSON.stringify(new URL(relative, moduleUrl).href)}`);
-  const hooks = `\nexport { openChrome, stopChrome, OUTPUT_LOCKS };
+  const hooks = `\nexport { openChrome, stopChrome, OUTPUT_LOCKS, readDocumentHtml };
     export function useLaunch(reserve) {
       chromePath = async () => '/fixture/chrome';
       reservePort = reserve;
@@ -163,13 +164,56 @@ async function captureHarness() {
   return import(`data:text/javascript;base64,${Buffer.from(source + hooks).toString("base64")}#${Math.random()}`);
 }
 
-function fixtureBrowser({ closeError, navigationError } = {}) {
-  const html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`;
+for (const size of ["short", "chunked"]) {
+  for (const [label, doctype, declaration, prefix] of [
+    ["HTML5", { name: "html", publicId: "", systemId: "" }, "<!DOCTYPE html>", "<!DOCTYPE html>\n"],
+    ["traditional PUBLIC/SYSTEM", { name: "html", publicId: "-//W3C//DTD HTML 4.01 Transitional//EN", systemId: "http://www.w3.org/TR/html4/loose.dtd" },
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">',
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">\n'],
+    ["absent DOCTYPE", null, "", ""],
+  ]) {
+    test(`readDocumentHtml preserves ${label} on the ${size} path`, async () => {
+      const mod = await captureHarness();
+      const html = `<html><body>${size === "chunked" ? "Large page boundary content. ".repeat(14000) : "A meaningful small document."}</body></html>`;
+      const expected = prefix + html;
+      const expressions = [];
+      let serializations = 0;
+      const context = vm.createContext({
+        document: { doctype, documentElement: { outerHTML: html } },
+        XMLSerializer: class {
+          serializeToString(node) {
+            assert.equal(node, doctype);
+            assert.notEqual(node, null);
+            serializations++;
+            return declaration;
+          }
+        },
+      });
+      const cdp = {
+        async send(method, params, sessionId) {
+          assert.equal(method, "Runtime.evaluate");
+          assert.equal(sessionId, "doctype-fixture");
+          expressions.push(params.expression);
+          return { result: { value: vm.runInContext(params.expression, context) } };
+        },
+      };
+      const actual = await mod.readDocumentHtml(cdp, "doctype-fixture");
+      assert.equal(actual.length, expected.length, "serialized output must include exactly the original declaration");
+      assert.equal(actual, expected);
+      assert.equal((actual.match(/<!DOCTYPE/g) || []).length, doctype ? 1 : 0);
+      assert.equal(serializations > 0, doctype !== null);
+      assert.equal(expressions.length, size === "chunked" ? 1 + Math.ceil(expected.length / 180000) : 2);
+    });
+  }
+}
+
+function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", summary: summaryOverrides = {} } = {}) {
   const state = { closes: 0, navigations: 0 };
   const browser = {
-    mode: "extension",
+    mode,
     close: async () => { state.closes++; if (closeError) throw new Error(closeError); },
     cdp: {
+      close: async () => { state.closes++; if (closeError) throw new Error(closeError); },
       onEvent: () => () => {},
       waitForEvent: async () => ({}),
       send: async (method, params) => {
@@ -177,11 +221,12 @@ function fixtureBrowser({ closeError, navigationError } = {}) {
         if (method === "Target.attachToTarget") return { sessionId: "fixture" };
         if (method === "Target.closeTarget") throw new Error("unsupported by extension");
         if (method === "Page.navigate") { state.navigations++; if (navigationError) throw new Error(navigationError); }
+        if (method === "Page.captureSnapshot") return { data: snapshot };
         if (method === "Page.captureScreenshot") return { data: Buffer.from("fixture image").toString("base64") };
         if (method === "Runtime.evaluate") {
           const summary = { url: "https://example.test/", title: "Fixture", viewport: { width: 1440, height: 1000 },
-            document: { width: 1440, height: 1000, htmlBytes: html.length, textLength: 1600 },
-            images: [], stylesheets: [], scripts: 0 };
+            document: { width: 1440, height: 1000, htmlBytes: html.length, textLength: html.replace(/<[^>]*>/g, "").length },
+            images: [], stylesheets: [], scripts: 0, ...summaryOverrides };
           return { result: { value: params.expression.includes("textSample:") ? summary : html } };
         }
         return {};
@@ -189,6 +234,55 @@ function fixtureBrowser({ closeError, navigationError } = {}) {
     },
   };
   return { browser, state };
+}
+
+function smallSnapshot(body, type = "text/html") {
+  return `Content-Type: multipart/related; boundary="fixture"\r\n\r\n--fixture\r\nContent-Type: ${type}\r\nContent-Location: https://example.test/\r\n\r\n${body}\r\n--fixture--\r\n`;
+}
+
+for (const mode of ["extension", "headless"]) {
+  test(`meaningful short HTML and small MHTML complete through ${mode} capture`, async () => {
+    await temporaryDirectory(async (dir) => {
+      const html = "<html><body>A small page with enough meaningful text to archive.</body></html>";
+      const snapshot = smallSnapshot(html);
+      assert.ok(Buffer.byteLength(snapshot) < 1000);
+      const mod = await captureHarness();
+      const { browser, state } = fixtureBrowser({ mode, html, snapshot });
+      mod.useBrowser(browser);
+      const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir });
+      assert.equal(result.status, "completed");
+      assert.match(await fs.readFile(path.join(dir, "index.html"), "utf8"), /enough meaningful text/);
+      const report = JSON.parse(await fs.readFile(path.join(dir, "report.json"), "utf8"));
+      assert.equal(report.offlineValidation.result, "passed");
+      assert.ok(report.archive.bytes < 1000);
+      assert.equal(state.navigations, 3);
+      assert.equal(mod.OUTPUT_LOCKS.size, 0);
+    });
+  });
+}
+
+for (const [label, options, error] of [
+  ["blank source", { html: "<html><body></body></html>" }, /未加载出可用内容/],
+  ["challenge source", { summary: { title: "Just a moment..." } }, /人机验证/],
+  ["denied source", { html: "<html><body>Access Denied for this resource.</body></html>", summary: { title: "Access Denied" } }, /拒绝/],
+  ["non-HTTP source", { summary: { url: "file:///fixture.html" } }, /非网页地址/],
+  ["malformed snapshot", { mode: "headless", snapshot: "not MHTML" }, /invalid MHTML/],
+  ["snapshot without boundary", { mode: "headless", snapshot: "Content-Type: multipart/related\r\n\r\nbody" }, /boundary is missing/],
+  ["snapshot without parts", { mode: "headless", snapshot: "Content-Type: multipart/related; boundary=fixture\r\n\r\n--fixture--\r\n" }, /no MIME parts/],
+  ["snapshot without HTML", { mode: "headless", snapshot: smallSnapshot("plain text", "text/plain") }, /HTML page part/],
+  ["empty HTML snapshot", { mode: "headless", snapshot: smallSnapshot("") }, /有效页面 HTML/],
+  ["whitespace HTML snapshot", { mode: "headless", snapshot: smallSnapshot(" \r\n\t ") }, /有效页面 HTML/],
+  ["empty snapshot and empty fallback", { mode: "headless", snapshot: "", html: "", summary: { document: { htmlBytes: 1500, textLength: 100 } } }, /有效页面 HTML/],
+]) {
+  test(`capture refuses ${label} without promoting output`, async () => {
+    await temporaryDirectory(async (dir) => {
+      const mod = await captureHarness();
+      mod.useBrowser(fixtureBrowser(options).browser);
+      await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: dir }), error);
+      assert.deepEqual(await fs.readdir(dir), []);
+      assert.equal(mod.OUTPUT_LOCKS.size, 0);
+    });
+  });
 }
 
 test("cleanup failure rejects a fully rendered capture before report or promotion and releases its lock", async () => {
