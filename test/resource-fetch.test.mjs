@@ -36,7 +36,7 @@ test("private resources on the explicitly selected source origin remain allowed"
   }
 });
 
-test("resource completion stops fetching after 120 resources", async () => {
+test("resource completion stops fetching after 1200 resources", async () => {
   let calls = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
@@ -44,19 +44,19 @@ test("resource completion stops fetching after 120 resources", async () => {
     return new Response("fixture", { headers: { "content-type": "image/png" } });
   };
   try {
-    const { mhtml, initial, sourceUrl } = imageArchive(130);
+    const { mhtml, initial, sourceUrl } = imageArchive(1300);
     const result = await completeExternalResources(mhtml, initial, sourceUrl);
-    assert.equal(calls, 120);
-    assert.equal(result.resources.length, 120);
-    assert.equal(result.materialized.externalReferences.length, 10);
+    assert.equal(calls, 1200);
+    assert.equal(result.resources.length, 1200);
+    assert.equal(result.materialized.externalReferences.length, 100);
     assert.ok(result.failures.length);
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test("resource completion stops fetching at the 100 MiB byte budget", async () => {
+test("resource completion stops fetching at the 1000 MiB byte budget", async () => {
   let calls = 0;
   const originalFetch = globalThis.fetch;
-  const bytes = new Uint8Array(20 * 1024 * 1024);
+  const bytes = new Uint8Array(200 * 1024 * 1024);
   globalThis.fetch = async () => {
     calls += 1;
     return new Response(bytes, { headers: { "content-type": "image/png", "content-length": String(bytes.length) } });
@@ -65,7 +65,7 @@ test("resource completion stops fetching at the 100 MiB byte budget", async () =
     const { mhtml, initial, sourceUrl } = imageArchive(12);
     const result = await completeExternalResources(mhtml, initial, sourceUrl);
     assert.equal(calls, 5);
-    assert.equal(result.totalBytes, 100 * 1024 * 1024);
+    assert.equal(result.totalBytes, 1000 * 1024 * 1024);
     assert.equal(result.resources.length, 5);
     assert.equal(result.materialized.externalReferences.length, 7);
   } finally { globalThis.fetch = originalFetch; }
@@ -74,7 +74,7 @@ test("resource completion stops fetching at the 100 MiB byte budget", async () =
 test("bytes read before a stream failure still consume the total budget", async () => {
   let calls = 0;
   const originalFetch = globalThis.fetch;
-  const bytes = new Uint8Array(20 * 1024 * 1024);
+  const bytes = new Uint8Array(200 * 1024 * 1024);
   globalThis.fetch = async () => {
     calls += 1;
     if (calls !== 1) return new Response(bytes, { headers: { "content-type": "image/png" } });
@@ -91,21 +91,21 @@ test("bytes read before a stream failure still consume the total budget", async 
     const { mhtml, initial, sourceUrl } = imageArchive(12);
     const result = await completeExternalResources(mhtml, initial, sourceUrl);
     assert.equal(calls, 5);
-    assert.equal(result.totalBytes, 80 * 1024 * 1024);
+    assert.equal(result.totalBytes, 800 * 1024 * 1024);
     assert.equal(result.resources.length, 4);
     assert.ok(result.failures.some((failure) => failure.error.includes("injected stream failure")));
     assert.ok(result.failures.some((failure) => failure.error.includes("byte total limit")));
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test("failed resource requests still consume the 120 request budget", async () => {
+test("failed resource requests still consume the 1200 request budget", async () => {
   let calls = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { calls += 1; return new Response("missing", { status: 404 }); };
   try {
-    const { mhtml, initial, sourceUrl } = imageArchive(130);
+    const { mhtml, initial, sourceUrl } = imageArchive(1300);
     const result = await completeExternalResources(mhtml, initial, sourceUrl);
-    assert.equal(calls, 120);
+    assert.equal(calls, 1200);
     assert.equal(result.resources.length, 0);
     assert.ok(result.failures.some((failure) => failure.error.includes("request limit")));
   } finally { globalThis.fetch = originalFetch; }
@@ -115,11 +115,11 @@ test("the final response is cancelled when it exceeds the remaining byte budget"
   let calls = 0;
   let cancelled = false;
   const originalFetch = globalThis.fetch;
-  const full = new Uint8Array(20 * 1024 * 1024);
+  const full = new Uint8Array(200 * 1024 * 1024);
   globalThis.fetch = async () => {
     calls += 1;
     if (calls < 5) return new Response(full, { headers: { "content-type": "image/png" } });
-    if (calls === 5) return new Response(new Uint8Array(19 * 1024 * 1024), { headers: { "content-type": "image/png" } });
+    if (calls === 5) return new Response(new Uint8Array(190 * 1024 * 1024), { headers: { "content-type": "image/png" } });
     const body = new ReadableStream({
       pull(controller) { controller.enqueue(new Uint8Array(512 * 1024)); },
       cancel() { cancelled = true; },
@@ -131,9 +131,9 @@ test("the final response is cancelled when it exceeds the remaining byte budget"
     const result = await completeExternalResources(mhtml, initial, sourceUrl);
     assert.equal(calls, 6);
     assert.equal(cancelled, true);
-    assert.equal(result.totalBytes, 99 * 1024 * 1024);
+    assert.equal(result.totalBytes, 990 * 1024 * 1024);
     assert.equal(result.resources.length, 5);
-    assert.ok(result.failures.some((failure) => failure.error.includes("1048576 byte limit")));
+    assert.ok(result.failures.some((failure) => failure.error.includes("10485760 byte limit")));
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -150,9 +150,9 @@ test("source 404 references are removed instead of left as offline failures", as
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test("an in-document video between 20 MiB and 64 MiB is downloaded", async () => {
+test("an in-document video between 200 MiB and 640 MiB is downloaded", async () => {
   const originalFetch = globalThis.fetch;
-  const bytes = new Uint8Array(30 * 1024 * 1024);
+  const bytes = new Uint8Array(201 * 1024 * 1024);
   globalThis.fetch = async () => new Response(bytes, {
     headers: { "content-type": "video/mp4", "content-length": String(bytes.length) },
   });

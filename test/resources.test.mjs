@@ -28,15 +28,15 @@ test("cross-origin IPv4-mapped IPv6 cannot reach a real loopback server", async 
   assert.equal(hits, 0);
 });
 
-test("200 same-origin resources cause no more than 120 real HTTP requests", async () => {
+test("1300 same-origin resources cause no more than 1200 real HTTP requests", async () => {
   let hits = 0;
   await withServer((_req, res) => { hits++; res.setHeader("content-type", "image/png"); res.end("fixture"); }, async (port) => {
     const url = `http://127.0.0.1:${port}/page`;
-    const mhtml = htmlToMhtml(Array.from({ length: 200 }, (_, i) => `<img src="/${i}.png">`).join(""), url);
+    const mhtml = htmlToMhtml(Array.from({ length: 1300 }, (_, i) => `<img src="/${i}.png">`).join(""), url);
     const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), url);
-    assert.equal(hits, 120);
-    assert.equal(result.resources.length, 120);
-    assert.equal(result.materialized.externalReferences.length, 80);
+    assert.equal(hits, 1200);
+    assert.equal(result.resources.length, 1200);
+    assert.equal(result.materialized.externalReferences.length, 100);
     assert.ok(result.failures.length > 0);
   });
 });
@@ -45,9 +45,9 @@ test("failed downloads count toward the request limit too", async () => {
   let hits = 0;
   await withServer((_req, res) => { hits++; res.writeHead(404); res.end(); }, async (port) => {
     const url = `http://127.0.0.1:${port}/page`;
-    const mhtml = htmlToMhtml(Array.from({ length: 200 }, (_, i) => `<img src="/${i}.png">`).join(""), url);
+    const mhtml = htmlToMhtml(Array.from({ length: 1300 }, (_, i) => `<img src="/${i}.png">`).join(""), url);
     const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), url);
-    assert.equal(hits, 120);
+    assert.equal(hits, 1200);
     assert.equal(result.resources.length, 0);
   });
 });
