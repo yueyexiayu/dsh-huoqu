@@ -160,7 +160,8 @@ async function captureHarness() {
       delay = async () => {};
       settlePage = async () => ({ scrollHeight: 100, scrollSteps: 1 });
       waitForNetworkQuiet = async () => {};
-    }`;
+    }
+    export function useResolver(fn) { resolveHostname = fn; }`;
   return import(`data:text/javascript;base64,${Buffer.from(source + hooks).toString("base64")}#${Math.random()}`);
 }
 
@@ -207,20 +208,26 @@ for (const size of ["short", "chunked"]) {
   }
 }
 
-function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", summary: summaryOverrides = {} } = {}) {
-  const state = { closes: 0, navigations: 0 };
+function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", summary: summaryOverrides = {}, responses = [] } = {}) {
+  const state = { closes: 0, navigations: 0, stopped: 0 };
+  const listeners = new Set();
   const browser = {
     mode,
     close: async () => { state.closes++; if (closeError) throw new Error(closeError); },
     cdp: {
       close: async () => { state.closes++; if (closeError) throw new Error(closeError); },
-      onEvent: () => () => {},
+      onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       waitForEvent: async () => ({}),
       send: async (method, params) => {
         if (method === "Target.createTarget") return { targetId: "fixture" };
         if (method === "Target.attachToTarget") return { sessionId: "fixture" };
         if (method === "Target.closeTarget") throw new Error("unsupported by extension");
-        if (method === "Page.navigate") { state.navigations++; if (navigationError) throw new Error(navigationError); }
+        if (method === "Page.stopLoading") { state.stopped++; return {}; }
+        if (method === "Page.navigate") {
+          state.navigations++;
+          if (navigationError) throw new Error(navigationError);
+          for (const event of responses) for (const listener of listeners) listener({ sessionId: "fixture", ...event });
+        }
         if (method === "Page.captureSnapshot") return { data: snapshot };
         if (method === "Page.captureScreenshot") return { data: Buffer.from("fixture image").toString("base64") };
         if (method === "Runtime.evaluate") {
@@ -394,3 +401,65 @@ for (const failure of ["reserve", "spawn-sync", "spawn-event"]) {
     });
   });
 }
+
+test("capture refuses a public URL redirected to a private host and deletes the stage", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser({ summary: { url: "http://169.254.169.254/latest/meta-data/" } });
+    mod.useBrowser(browser);
+    await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: dir }), /private\/local/);
+    assert.equal(state.navigations, 1);
+    assert.deepEqual(await fs.readdir(dir), []);
+    assert.equal(mod.OUTPUT_LOCKS.size, 0);
+  });
+});
+
+test("capture refuses a public name that resolves to a private address before navigation", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser();
+    mod.useBrowser(browser);
+    mod.useResolver(async () => [{ address: "10.0.0.8", family: 4 }]);
+    await assert.rejects(mod.capturePage({ url: "https://rebind.example/", output_dir: dir }), /private\/local/);
+    assert.equal(state.navigations, 0);
+    assert.deepEqual(await fs.readdir(dir), []);
+    assert.equal(mod.OUTPUT_LOCKS.size, 0);
+  });
+});
+
+test("capture allows an explicitly requested private host and rejects a different final host", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const allowed = fixtureBrowser({ summary: { url: "http://127.0.0.1/" } });
+    mod.useBrowser(allowed.browser);
+    const result = await mod.capturePage({ url: "http://127.0.0.1/", output_dir: dir });
+    assert.equal(result.status, "completed");
+    assert.equal(allowed.state.navigations, 3);
+  });
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const redirected = fixtureBrowser({ summary: { url: "http://localhost/" } });
+    mod.useBrowser(redirected.browser);
+    await assert.rejects(mod.capturePage({ url: "http://127.0.0.1/", output_dir: dir }), /private\/local/);
+    assert.equal(redirected.state.navigations, 1);
+    assert.deepEqual(await fs.readdir(dir), []);
+  });
+});
+
+test("a private remote address for a different host aborts before promotion", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser({
+      responses: [{
+        method: "Network.responseReceived",
+        params: { requestId: "1", response: { url: "http://169.254.169.254/latest/meta-data/", remoteIPAddress: "169.254.169.254" } },
+      }],
+    });
+    mod.useBrowser(browser);
+    await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: dir }), /private\/local/);
+    assert.equal(state.navigations, 1);
+    assert.equal(state.stopped, 1);
+    assert.deepEqual(await fs.readdir(dir), []);
+    assert.equal(mod.OUTPUT_LOCKS.size, 0);
+  });
+});

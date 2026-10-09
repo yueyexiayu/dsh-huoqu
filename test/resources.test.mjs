@@ -64,6 +64,18 @@ test("streamed bytes consume a shared budget, including failed responses", async
   assert.equal(oversized.remaining, 4);
 });
 
+test("redirect from the requested host to a different private host never connects", async () => {
+  let secretHits = 0;
+  await withServer((req, res) => {
+    if (req.url === "/secret") { secretHits += 1; res.end("secret"); return; }
+    res.writeHead(302, { location: `http://localhost:${req.socket.localPort}/secret` });
+    res.end();
+  }, async (port) => {
+    await assert.rejects(fetchExtraResource(`http://127.0.0.1:${port}/start`, `http://127.0.0.1:${port}/page`), /blocked/);
+  });
+  assert.equal(secretHits, 0);
+});
+
 test("duplicate redirect targets preserve all request aliases", async () => {
   await withServer((req, res) => {
     if (req.url !== "/shared.png") { res.writeHead(302, { location: "/shared.png" }); res.end(); }
