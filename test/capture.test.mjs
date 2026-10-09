@@ -7,6 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { EventEmitter } from "node:events";
 import childProcess from "node:child_process";
 import vm from "node:vm";
+import { pathToFileURL } from "node:url";
 
 // Exercise the existing transaction directly without starting a browser.
 import { capturePage, createOutputStage, finalizeStage } from "../lib/capture.js";
@@ -149,7 +150,7 @@ async function captureHarness() {
   const moduleUrl = new URL("../lib/capture.js", import.meta.url);
   const source = (await fs.readFile(moduleUrl, "utf8")).replace(/from "(\.\.?\/[^\"]+)"/g,
     (_, relative) => `from ${JSON.stringify(new URL(relative, moduleUrl).href)}`);
-  const hooks = `\nexport { openChrome, stopChrome, OUTPUT_LOCKS, readDocumentHtml };
+  const hooks = `\nexport { openChrome, stopChrome, OUTPUT_LOCKS, readDocumentHtml, withoutSavedFileRejections, canonicalOutputDir };
     export function useLaunch(reserve) {
       chromePath = async () => '/fixture/chrome';
       reservePort = reserve;
@@ -208,7 +209,7 @@ for (const size of ["short", "chunked"]) {
   }
 }
 
-function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", summary: summaryOverrides = {}, responses = [] } = {}) {
+function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", summary: summaryOverrides = {}, responses = [], fileResponses = [] } = {}) {
   const state = { closes: 0, navigations: 0, stopped: 0 };
   const listeners = new Set();
   const browser = {
@@ -226,7 +227,8 @@ function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fi
         if (method === "Page.navigate") {
           state.navigations++;
           if (navigationError) throw new Error(navigationError);
-          for (const event of responses) for (const listener of listeners) listener({ sessionId: "fixture", ...event });
+          const events = String(params?.url || "").startsWith("file:") ? [...responses, ...fileResponses] : responses;
+          for (const event of events) for (const listener of listeners) listener({ sessionId: "fixture", ...event });
         }
         if (method === "Page.captureSnapshot") return { data: snapshot };
         if (method === "Page.captureScreenshot") return { data: Buffer.from("fixture image").toString("base64") };
@@ -462,4 +464,114 @@ test("a private remote address for a different host aborts before promotion", as
     assert.deepEqual(await fs.readdir(dir), []);
     assert.equal(mod.OUTPUT_LOCKS.size, 0);
   });
+});
+
+function failedFileEvents(url, errorText) {
+  return [
+    { method: "Network.requestWillBeSent", params: { requestId: "offline-1", request: { url } } },
+    { method: "Network.loadingFailed", params: { requestId: "offline-1", errorText } },
+  ];
+}
+
+test("offline validation ignores only a non-empty image disconnected by offline simulation", async () => {
+  const mod = await captureHarness();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "huoqu-offline-"));
+  try {
+    const image = path.join(dir, "photo.png");
+    const empty = path.join(dir, "empty.png");
+    const css = path.join(dir, "app.css");
+    const font = path.join(dir, "face.woff2");
+    await fs.writeFile(image, "png");
+    await fs.writeFile(empty, "");
+    await fs.writeFile(css, "body{}");
+    await fs.writeFile(font, "font");
+    const file = (target) => pathToFileURL(target).href;
+    const disconnected = "net::ERR_INTERNET_DISCONNECTED";
+    const split = await mod.withoutSavedFileRejections([
+      { url: file(image), error: disconnected },
+      { url: file(empty), error: disconnected },
+      { url: file(image), error: "net::ERR_FILE_NOT_FOUND" },
+      { url: file(css), error: disconnected },
+      { url: file(font), error: disconnected },
+      { url: "https://cdn.example/app.css", error: disconnected },
+    ]);
+    assert.equal(split.ignored, 1);
+    assert.equal(split.blocking.length, 5);
+    assert.ok(split.blocking.some((failure) => failure.url.endsWith("app.css")));
+    assert.ok(split.blocking.some((failure) => failure.url.endsWith("face.woff2")));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+for (const [label, name, errorText, ok] of [
+  ["saved image offline simulation", "photo.png", "net::ERR_INTERNET_DISCONNECTED", true],
+  ["saved image with another error", "photo.png", "net::ERR_FILE_NOT_FOUND", false],
+  ["saved stylesheet offline simulation", "app.css", "net::ERR_INTERNET_DISCONNECTED", false],
+  ["saved font offline simulation", "face.woff2", "net::ERR_INTERNET_DISCONNECTED", false],
+]) {
+  test(`capture reports ${label} as ${ok ? "completed" : "partial"}`, async () => {
+    const assetDir = await fs.mkdtemp(path.join(os.tmpdir(), "huoqu-asset-"));
+    try {
+      const asset = path.join(assetDir, name);
+      await fs.writeFile(asset, name.endsWith(".png") ? "png" : "body{}");
+      await temporaryDirectory(async (dir) => {
+        const mod = await captureHarness();
+        mod.useBrowser(fixtureBrowser({ fileResponses: failedFileEvents(pathToFileURL(asset).href, errorText) }).browser);
+        const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir });
+        assert.equal(result.ok, ok);
+        assert.equal(result.status, ok ? "completed" : "partial");
+        const report = JSON.parse(await fs.readFile(path.join(dir, "report.json"), "utf8"));
+        assert.equal(report.offlineValidation.result, ok ? "passed" : "partial");
+        if (!ok && /\.(?:css|woff2)$/.test(name)) {
+          assert.match(report.offlineValidation.htmlIssues.join("\n"), /样式或字体加载失败/);
+        }
+      });
+    } finally {
+      await fs.rm(assetDir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("output lock treats /tmp and /private/tmp as the same directory", async () => {
+  const name = `huoqu-lock-${process.pid}-${Date.now()}`;
+  const viaTmp = path.join("/tmp", name);
+  const viaPrivate = path.join("/private/tmp", name);
+  await fs.mkdir(viaTmp);
+  const real = await fs.realpath(viaTmp);
+  const mod = await captureHarness();
+  let release = () => {};
+  let pendingError = Promise.resolve(null);
+  try {
+    assert.equal(real, path.join("/private/tmp", name));
+    assert.equal(await mod.canonicalOutputDir(viaTmp), real);
+    assert.equal(await mod.canonicalOutputDir(viaPrivate), real);
+    const missing = path.join("/tmp", `${name}-missing`, "out");
+    assert.equal(await mod.canonicalOutputDir(missing), path.join("/private/tmp", `${name}-missing`, "out"));
+
+    let entered;
+    const enteredPromise = new Promise((resolve) => { entered = resolve; });
+    const held = new Promise((resolve) => { release = resolve; });
+    const { browser } = fixtureBrowser();
+    const send = browser.cdp.send.bind(browser.cdp);
+    browser.cdp.send = async (method, params) => {
+      if (method === "Target.createTarget") entered();
+      if (method === "Page.navigate") await held;
+      return send(method, params);
+    };
+    mod.useBrowser(browser);
+    const pending = mod.capturePage({ url: "https://example.test/", output_dir: viaTmp });
+    pendingError = pending.then(() => null, (error) => error);
+    await enteredPromise;
+    assert.deepEqual([...mod.OUTPUT_LOCKS], [real]);
+    await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: viaPrivate }), /already writing/);
+    release();
+    release = () => {};
+    assert.equal(await pendingError, null);
+    assert.equal(mod.OUTPUT_LOCKS.size, 0);
+  } finally {
+    release();
+    await pendingError;
+    await fs.rm(real, { recursive: true, force: true });
+  }
 });
