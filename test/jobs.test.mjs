@@ -4,6 +4,7 @@ import { createJobManager } from "../lib/index.js";
 
 const turn = () => new Promise(setImmediate);
 const options = { url: "https://example.test/", outputDir: "/tmp/fixture" };
+const session = { id: "fixture" };
 
 test("job queue caps running+queued, cancels queued work without starting it, and drains serially", async () => {
   const started = [];
@@ -17,15 +18,15 @@ test("job queue caps running+queued, cancels queued work without starting it, an
     return { ok: true };
   });
   try {
-    const a = manager.start(options);
-    const b = manager.start(options);
-    const c = manager.start(options);
-    const d = manager.start(options);
-    assert.throws(() => manager.start(options), (error) => error.status === 429);
+    const a = manager.start(options, session);
+    const b = manager.start(options, session);
+    const c = manager.start(options, session);
+    const d = manager.start(options, session);
+    assert.throws(() => manager.start(options, session), (error) => error.status === 429);
     await turn();
     assert.deepEqual(started, [a.id]);
     assert.equal(b.status, "queued");
-    manager.cancel(b.id);
+    manager.cancel(b.id, session);
     await b.promise;
     assert.equal(b.status, "cancelled");
     releases.shift()();
@@ -46,12 +47,12 @@ test("partial capture is a distinct recoverable terminal result, never completed
   const result = { ok: false, status: "partial", indexHtml: "/tmp/fixture/index.html", warnings: ["offline validation failed"] };
   const manager = createJobManager(async () => result);
   try {
-    const job = manager.start(options);
+    const job = manager.start(options, session);
     await job.promise;
     assert.equal(job.status, "partial");
-    assert.equal(manager.list()[0].status, "partial");
-    assert.equal(manager.get(job.id).result, result);
-    manager.cancel(job.id);
+    assert.equal(manager.list(session)[0].status, "partial");
+    assert.equal(manager.get(job.id, session).result, result);
+    manager.cancel(job.id, session);
     assert.equal(job.status, "partial");
   } finally { await manager.dispose(); }
 });
@@ -68,17 +69,17 @@ test("timeout starts at enqueue and holds the running slot through cooperative c
   }, { timeoutMs: 15 });
   const holdEventLoop = setTimeout(() => {}, 1000);
   try {
-    const a = manager.start(options);
-    const b = manager.start(options);
+    const a = manager.start(options, session);
+    const b = manager.start(options, session);
     await b.promise;
     assert.equal(b.status, "timed_out");
     assert.equal(a.status, "cancelling");
     assert.equal(a.controller.signal.aborted, true);
     assert.equal(calls, 1);
-    const c = manager.start(options);
+    const c = manager.start(options, session);
     await turn();
     assert.equal(c.status, "queued");
-    manager.cancel(c.id);
+    manager.cancel(c.id, session);
     finishCleanup();
     await a.promise;
     assert.equal(a.status, "timed_out");
@@ -96,8 +97,8 @@ test("dispose cancels running and queued jobs and waits for cleanup", async () =
     await new Promise((resolve) => { release = resolve; });
     signal.throwIfAborted();
   });
-  const a = manager.start(options);
-  const b = manager.start(options);
+  const a = manager.start(options, session);
+  const b = manager.start(options, session);
   await turn();
   let finished = false;
   const disposed = manager.dispose().then(() => { finished = true; });
@@ -108,5 +109,5 @@ test("dispose cancels running and queued jobs and waits for cleanup", async () =
   release();
   await disposed;
   assert.equal(a.status, "cancelled");
-  assert.throws(() => manager.start(options), (error) => error.status === 503);
+  assert.throws(() => manager.start(options, session), (error) => error.status === 503);
 });

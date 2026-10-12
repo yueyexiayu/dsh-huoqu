@@ -8,13 +8,13 @@ const clientPath = new URL("../lib/client.js", import.meta.url);
 // A small deterministic hooks runner executes the shipped Client code, including
 // mount effects, async requests and handlers. It is not a real browser acceptance test.
 function mountClient(source, fetch) {
-  let api, pane, cursor = 0, mounted = false;
+  let api, pane, cursor = 0;
   const hooks = [], effects = [], cleanup = [], timers = [];
   const React = {
     createElement(type, props, ...children) { return { type, props: props || {}, children: children.flat(Infinity) }; },
     useState(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (value) => { hooks[index] = value; }]; },
     useRef(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = { current: initial }; return hooks[index]; },
-    useEffect(fn) { cursor++; if (!mounted) effects.push(fn); },
+    useEffect(fn, deps) { const index = cursor++; const previous = hooks[index]; if (!previous || deps.some((value, n) => value !== previous[n])) { hooks[index] = deps; effects.push({ index, fn }); } },
   };
   vm.runInNewContext(source, {
     window: { __ModuleLoader__: { load(definition) { api = definition.factory(() => React); } } },
@@ -26,10 +26,10 @@ function mountClient(source, fetch) {
     slots: { inject(_, fn) { return fn(); }, register(spec, component) { if (spec.name === "sidebar.right.pane.tab") pane = component; } },
   });
   return {
-    render(props) {
+    render(props = { sessionId: "fixture" }) {
       cursor = 0;
       const node = pane(props);
-      if (!mounted) { mounted = true; for (const effect of effects) cleanup.push(effect()); }
+      for (const { index, fn } of effects.splice(0)) { cleanup[index]?.(); cleanup[index] = fn(); }
       return node;
     },
     unmount() { for (const fn of cleanup) fn?.(); },
@@ -296,7 +296,7 @@ test("sidebar folder button calls the native folder picker API action", async ()
       },
     });
     assert.equal(typeof pane, "function");
-    const button = findButtons(pane()).find((item) => item.children.includes("选择文件夹"));
+    const button = findButtons(pane({ sessionId: "fixture" })).find((item) => item.children.includes("选择文件夹"));
     assert.ok(button, "folder picker button should render");
     await button.props.onClick();
     assert.equal(requestUrl, "/api/huoqu");
@@ -307,6 +307,40 @@ test("sidebar folder button calls the native folder picker API action", async ()
     globalThis.window = previous.window;
     globalThis.fetch = previous.fetch;
   }
+});
+
+test("missing session disables capture and picker, and never requests Host default jobs", async () => {
+  const requests = [];
+  const client = mountClient(await readFile(clientPath, "utf8"), async (...args) => { requests.push(args); return response({ ok: true, jobs: [] }); });
+  try {
+    client.render({}); await client.drain();
+    const tree = client.render({});
+    assert.match(text(tree), /已拒绝操作/);
+    assert.equal(button(tree, "选择文件夹").props.disabled, true);
+    assert.equal(button(tree, "获取并生成").props.disabled, true);
+    assert.equal(requests.length, 0);
+  } finally { client.unmount(); }
+});
+
+test("session change clears prior jobs/results and ignores late old-session list", async () => {
+  const old = deferred(), requests = [];
+  const client = mountClient(await readFile(clientPath, "utf8"), async (url) => {
+    requests.push(url);
+    return String(url).includes("sessionId=A") ? old.promise : response({ ok: true, jobs: [] });
+  });
+  try {
+    client.render({ sessionId: "A" });
+    const inputs = walk(client.render({ sessionId: "A" }), (node) => node.type === "input");
+    inputs[0].props.onChange({ target: { value: "https://example.test/private-A" } });
+    inputs[1].props.onChange({ target: { value: "/tmp/private-A" } });
+    client.render({ sessionId: "B" }); await client.drain();
+    assert.ok(walk(client.render({ sessionId: "B" }), (node) => node.type === "input").every((node) => node.props.value === ""));
+    old.resolve(response({ ok: true, jobs: [{ jobId: "old", status: "completed", url: "https://example.test/private-A", outputDir: "/tmp/private-A" }] }));
+    await client.drain();
+    assert.doesNotMatch(text(client.render({ sessionId: "B" })), /private-A/);
+    assert.equal(requests.length, 2);
+    assert.ok(String(requests[1]).includes("sessionId=B"));
+  } finally { client.unmount(); }
 });
 
 test("sidebar capture sends the current conversation sessionId", async () => {

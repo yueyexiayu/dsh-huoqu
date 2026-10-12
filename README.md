@@ -28,9 +28,11 @@
 
 - 工具调用使用当前会话的文件策略及工作区。
 - 侧栏采集会带上当前对话的 `sessionId`，并使用该会话已经生效的文件策略，不另造 `danger-full-access`，也不接受请求里的权限提升字段。未关联会话、或会话未加载时拒绝采集，不会悄悄退回 Host 默认策略。
-- 未提供 `sessionId` 的旧请求仍使用 DSH **部署默认策略**。桌面部署默认通常是 `workspace-write`，即使权限预设是 `danger-full-access`。
+- 所有 HTTP 操作都必须传入有效 `sessionId`：GET 列表/状态使用查询参数；POST 采集、取消、打开及选择文件夹使用 JSON 字段。缺失、空白或畸形 ID 返回 400；不存在或仅在历史中、尚未加载的会话返回 403；服务不可用返回 503。不会主动加载历史会话，也不接受 agentless 工具调用或默认工作区回落。
 - `read-only` 拒绝采集；`workspace-write` 仅允许规范化后的工作区、`/tmp` 和平台临时目录；`danger-full-access` 不限制写入位置。
 - 默认输出在 `~/Downloads/huoqu/`。`workspace-write` 下该位置会被拒绝，应改到工作区或临时目录；当前会话为 `danger-full-access` 时可以写入。
+
+任务绑定创建时的 loaded Session 对象，列表、状态、取消及本地打开均只认同一归属；另一会话请求返回 404，不泄露 URL、路径和结果。卸载后重新加载同 ID 的会话也不继承旧对象的任务。排队执行及每次文件写入/回滚/清理前重新确认 live 身份并解析最新策略；收紧策略或卸载会话后，无法获准的清理不会绕过策略，错误会报告残留临时目录/浏览器 profile 的位置。只读模式仍允许查看、打开自己的既有结果及请求停止；停止浏览器和退出清理不使用原始授权缓存。侧栏切换会话会清空旧结果并丢弃迟到响应，缺少会话时禁用采集和目录选择。
 
 侧栏任务串行运行，最多保留 4 个运行或排队任务；排队开始 240 秒后请求停止，并等待清理退出，不强制将仍在清理的任务标为已结束。支持取消、列表恢复和组件重新挂载后继续查询。终态任务最多保留 1 小时、最多 40 条；Host 重启不会持久恢复旧任务。取消或超时先显示正在停止，待清理退出后才进入终态并释放运行位置。插件卸载会请求停止并等待任务及工具调用清理。
 
@@ -63,6 +65,10 @@ for file in lib/*.js; do /usr/local/bin/node --check "$file" || exit; done
 /usr/local/bin/node --test test/*.test.mjs
 # 可选：全部回归，包含真实隔离 Chrome 安全与 SVG 像素测试，不访问用户正式 Chrome
 HUOQU_BROWSER_TESTS=1 /usr/local/bin/node --test test/*.test.mjs
+# 可选：对只读官方包运行真实 SessionStore / sandboxPolicy / FS 契约测试
+DSH_OFFICIAL_ROOT=/path/to/official/dsh HUOQU_BROWSER_TESTS=1 /usr/local/bin/node --test test/*.test.mjs
 ```
+
+会话回归覆盖所有 HTTP 操作缺失/空白/畸形 ID 拒绝、历史/未加载对象拒绝、跨会话列表/状态/取消/打开隔离、排队后卸载与收紧策略、取消时的清理权限、切换会话的迟到响应。可选官方集成直接使用 Cordis Context、SessionStore、SessionProjectionRegistry、SandboxPolicyService 与 LocalFileSystem：官方 `SessionStore.get(id)` 只返回 live 对象，`prepare()` 的 detached 会话不可执行，`resolve({ session })` 从投影事件读取实时 mode 和 session 工作区；本插件不调用默认 `resolve({})`，也不制造会话对象。
 
 常规测试覆盖权限、任务取消/卸载/恢复、过期取消响应不覆盖新任务选择、参数规范化、资源限制、IPv6 私有地址、别名重定向、静态化、输出事务、Chrome 启动失败及清理失败；新增完整采集路径的短正文、小 MHTML、畸形/空归档拒绝，以及短路径/分块读取的 HTML5、传统和缺省 DOCTYPE。真实浏览器回归使用无害合成页面，检查自动业务按钮未触发、正常 MHTML 与快照失败的 HTML 回退均不执行本地文件读取脚本；嵌套 data 样式表在线生效、离线被 CSP 阻止且如实返回 `partial`。真实 SVG 和短页面分别覆盖正常快照与 DOM 回退：安全页面 `completed`、源站/HTML/MHTML 截图字节相同，带样式 SVG 仍为 `partial` 且不污染宿主；短页面同时验证标准模式和无 DOCTYPE 的 quirks 模式。

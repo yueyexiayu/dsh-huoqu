@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, realpath, rm, symlink, access as fsAccess } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createCaptureAccess } from "../lib/permissions.js";
+import { createCaptureAccess as createAccess } from "../lib/permissions.js";
+const fixtureSession = { id: "fixture", header: { cwd: os.tmpdir() } };
+const createCaptureAccess = (ctx, exec = { agent: { session: fixtureSession } }) => createAccess(ctx, exec);
 import { capturePage } from "../lib/capture.js";
 
 // A local FS service test double implements only the official public interfaces;
@@ -23,7 +25,8 @@ async function resolveNative(value) {
 }
 function context(policy, requests = []) {
   return {
-    sandboxPolicy: { resolve(request) { requests.push(request); return typeof policy === "function" ? policy(request) : policy; } },
+    sessions: { get(id) { return id === fixtureSession.id ? fixtureSession : undefined; } },
+    sandboxPolicy: { resolve(request) { requests.push(request); return { ...(typeof policy === "function" ? policy(request) : policy), sessionId: request.session?.id }; } },
     fs: {
       async resolve(value) { return { displayPath: value, targetKey: await resolveNative(value) }; },
       processPath(target) { return target.targetKey; },
@@ -37,7 +40,7 @@ function context(policy, requests = []) {
 const denied = { code: "FS_SANDBOX_DENIED" };
 
 test("missing/unknown official policy fails closed rather than running without permission checks", async () => {
-  await assert.rejects(createCaptureAccess({}), denied);
+  await assert.rejects(createCaptureAccess({}), /无法读取当前会话/);
   const ctx = context({ mode: "unknown", workspaceRoot: os.tmpdir() });
   await assert.rejects((await createCaptureAccess(ctx)).assertWrite(path.join(os.tmpdir(), "capture")), denied);
 });
@@ -73,7 +76,7 @@ test("workspace fence canonicalizes roots, checks both rename endpoints and bloc
 test("session policy is supplied and reread on every mutation, including cleanup", async () => {
   const requests = [];
   let mode = "danger-full-access";
-  const session = { id: "fixture", header: { cwd: os.tmpdir() } };
+  const session = fixtureSession;
   const access = await createCaptureAccess(context(() => ({ mode, workspaceRoot: os.tmpdir() }), requests), { agent: { session } });
   await access.assertWrite(path.join(os.homedir(), "Downloads", "huoqu", "fixture"));
   mode = "read-only";
@@ -81,9 +84,8 @@ test("session policy is supplied and reread on every mutation, including cleanup
   assert.deepEqual(requests, [{ session }, { session }]);
 });
 
-test("agentless UI jobs use deployment policy and cannot silently elevate", async () => {
+test("agentless calls are rejected without resolving deployment policy", async () => {
   const requests = [];
-  const access = await createCaptureAccess(context({ mode: "read-only", workspaceRoot: os.tmpdir() }, requests));
-  await assert.rejects(access.assertWrite(path.join(os.tmpdir(), "capture")), denied);
-  assert.deepEqual(requests, [{}]);
+  await assert.rejects(createAccess(context({ mode: "danger-full-access", workspaceRoot: os.tmpdir() }, requests)), /sessionId/);
+  assert.deepEqual(requests, []);
 });

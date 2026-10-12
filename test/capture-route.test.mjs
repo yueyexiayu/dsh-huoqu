@@ -42,7 +42,8 @@ hook.deregister();
 let tool, route, dispose;
 let mode = "danger-full-access";
 const policyRequests = [];
-const sessions = new Map();
+const session = { id: "session-fixture", header: { cwd: "/tmp" } };
+const sessions = new Map([[session.id, session]]);
 const sessionModes = new Map();
 const fsTargets = [];
 apply({
@@ -56,17 +57,17 @@ apply({
   },
   sandboxPolicy: { resolve(request) {
     policyRequests.push(request);
-    return { mode: request.session ? (sessionModes.get(request.session.id) || mode) : mode, workspaceRoot: "/tmp" };
+    return { mode: request.session ? (sessionModes.get(request.session.id) || mode) : mode, workspaceRoot: "/tmp", sessionId: request.session?.id };
   } },
   sessions: { get(id) { return sessions.get(id); } },
 });
 const post = (body, signal) => route.fetch(new Request("http://dsh.local/api/huoqu", {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal,
+  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: session.id, ...body }), signal,
 }));
-const state = async (id) => (await route.fetch(new Request(`http://dsh.local/api/huoqu?jobId=${id}`))).json();
-async function settled(id) {
+const state = async (id, sessionId = session.id) => (await route.fetch(new Request(`http://dsh.local/api/huoqu?jobId=${id}&sessionId=${sessionId}`))).json();
+async function settled(id, sessionId = session.id) {
   for (let i = 0; i < 100; i++) {
-    const value = await state(id);
+    const value = await state(id, sessionId);
     if (!["queued", "running", "cancelling"].includes(value.status)) return value;
     await new Promise(setImmediate);
   }
@@ -79,9 +80,9 @@ const start = async (suffix, extra = {}) => {
 };
 
 test("Host tool preserves ownership and resolves the calling session policy", async () => {
-  const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture" }, { agent: { session: { id: "session-fixture" } } });
+  const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture" }, { agent: { session } });
   assert.equal(result.title, "session-fixture");
-  assert.deepEqual(policyRequests.at(-1), { session: { id: "session-fixture" } });
+  assert.deepEqual(policyRequests.at(-1), { session });
   assert.ok(fsTargets.includes("/tmp/fixture"));
 });
 
@@ -97,7 +98,7 @@ test("capture jobs have distinct owners, preserve wait_seconds and partial valid
   assert.equal(partial.result.title, `huoqu-job:${first.jobId}`);
   assert.equal(good.result.title, `huoqu-job:${second.jobId}`);
   assert.notEqual(partial.result.title, good.result.title);
-  assert.deepEqual(policyRequests.at(-1), {});
+  assert.deepEqual(policyRequests.at(-1), { session });
   const failed = await settled((await start("failed")).jobId);
   assert.equal(failed.status, "failed");
   assert.equal(failed.result, null);
@@ -116,8 +117,8 @@ test("HTTP rejects read-only policy and permission overrides before starting", a
 });
 
 test("sidebar capture uses the loaded conversation policy instead of deployment workspace-write", async () => {
-  const full = { id: "conversation-full" };
-  const limited = { id: "conversation-limited" };
+  const full = { id: "conversation-full", header: { cwd: "/tmp" } };
+  const limited = { id: "conversation-limited", header: { cwd: "/tmp" } };
   sessions.set(full.id, full);
   sessions.set(limited.id, limited);
   sessionModes.set(full.id, "danger-full-access");
@@ -139,7 +140,7 @@ test("sidebar capture uses the loaded conversation policy instead of deployment 
     const started = await post({ url: "https://example.test/good", output_dir: "/Users/ning/Downloads", sessionId: full.id });
     assert.equal(started.status, 202);
     const job = await started.json();
-    const done = await settled(job.jobId);
+    const done = await settled(job.jobId, full.id);
     assert.equal(done.status, "completed");
     assert.equal(done.result.title, `huoqu-job:${job.jobId}`);
     const seen = policyRequests.slice(before);
@@ -147,7 +148,7 @@ test("sidebar capture uses the loaded conversation policy instead of deployment 
     assert.ok(seen.every((request) => request.session === full));
   } finally {
     mode = previous;
-    sessions.clear();
+    sessions.delete(full.id); sessions.delete(limited.id);
     sessionModes.clear();
   }
 });
@@ -169,7 +170,7 @@ test("HTTP jobs survive request disconnect, can be listed/recovered and explicit
   await new Promise(setImmediate);
   request.abort();
   assert.equal((await state(job.jobId)).status, "running");
-  const listing = await (await route.fetch(new Request("http://dsh.local/api/huoqu"))).json();
+  const listing = await (await route.fetch(new Request(`http://dsh.local/api/huoqu?sessionId=${session.id}`))).json();
   assert.ok(listing.jobs.some((entry) => entry.jobId === job.jobId && entry.status === "running"));
   const cancelled = await post({ action: "cancel", jobId: job.jobId });
   assert.equal(cancelled.status, 200);
@@ -189,22 +190,22 @@ test("missing optional Chrome owner allows startup/capture, other owner errors s
     // A fresh Host entry must not statically import Chrome at startup.
     const standalone = await import("../lib/index.js?owner-unavailable");
     assert.equal(standalone.name, "huoqu");
-    const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture" }, {});
+    const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture" }, { agent: { session } });
     assert.equal(result.ok, true);
     failure = new SyntaxError("owner fixture syntax failure");
-    await assert.rejects(tool.execute({ url: "https://example.test/good" }, {}), /owner fixture syntax failure/);
+    await assert.rejects(tool.execute({ url: "https://example.test/good" }, { agent: { session } }), /owner fixture syntax failure/);
     failure = Object.assign(new Error("transitive dependency missing"), { code: "ERR_MODULE_NOT_FOUND", url: "file:///missing-dependency.js" });
-    await assert.rejects(tool.execute({ url: "https://example.test/good" }, {}), /transitive dependency missing/);
+    await assert.rejects(tool.execute({ url: "https://example.test/good" }, { agent: { session } }), /transitive dependency missing/);
   } finally { missing.deregister(); }
 });
 
 test("plugin disposal aborts captures and refuses new work", async () => {
   const job = await start("hold");
-  const toolStopped = assert.rejects(tool.execute({ url: "https://example.test/hold", output_dir: "/tmp/fixture" }, {}), /disposed/);
+  const toolStopped = assert.rejects(tool.execute({ url: "https://example.test/hold", output_dir: "/tmp/fixture" }, { agent: { session } }), /disposed/);
   await new Promise(setImmediate);
   await dispose();
   await toolStopped;
   assert.equal((await state(job.jobId)).status, "cancelled");
   assert.equal((await post({ url: "https://example.test/good" })).status, 503);
-  await assert.rejects(tool.execute({ url: "https://example.test/good" }, {}), /disposed/);
+  await assert.rejects(tool.execute({ url: "https://example.test/good" }, { agent: { session } }), /disposed/);
 });

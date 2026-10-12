@@ -314,14 +314,14 @@ test("pinned resource request connects to the resolved address and keeps the ori
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const port = server.address().port;
-    const response = await pinnedResourceRequest(new URL(`http://pinned.example:${port}/asset.png`), {
+    const response = await pinnedResourceRequest(new URL(`http://pinned.test:${port}/asset.png`), {
       address: "127.0.0.1",
       family: 4,
       headers: { accept: "image/*" },
     });
     assert.equal(response.status, 200);
     assert.equal(await response.text(), "pinned");
-    assert.equal(hits[0], `pinned.example:${port}`);
+    assert.equal(hits[0], `pinned.test:${port}`);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
