@@ -4,7 +4,7 @@
 
 在 DeepSeek Harness 里采集网页的当前渲染结果，保存为可离线打开的**静态副本**。
 
-连接 [Chrome 插件](https://github.com/yueyexiayu/dsh-chrome) 的扩展时，复用当前正式 Chrome 的后台标签和登录状态，不另开调试端口。未安装插件或扩展未连接时，退回隔离的无头 Chrome；部分站点会拦截无头浏览器。配套 Chrome 插件需提供 `openCaptureSession`。采集使用独立所有权，完成、取消后释放，不接管对话正在操作的标签。
+连接 [Chrome 插件](https://github.com/yueyexiayu/dsh-chrome) 的扩展时，复用当前正式 Chrome 的后台标签和登录状态，不另开调试端口。未安装插件或扩展未连接时，使用隔离的无头浏览器；部分站点会拦截无头浏览器。macOS 无头路径只使用专用 Chromium headless shell，默认在 `~/Library/Caches/ms-playwright/chromium_headless_shell-<revision>/chrome-headless-shell-mac-{arm64,x64}/chrome-headless-shell` 中选择最新可执行版本，也支持 `PLAYWRIGHT_BROWSERS_PATH` 自定义缓存。缺失时明确失败，不回退 Google Chrome.app/Chromium.app；可用当前项目 Playwright CLI 安装 `chromium-headless-shell`，或用 `HUOQU_CHROME_PATH` 指定专用 shell。显式路径失效、指向 GUI .app 或链接到 GUI 可执行文件时拒绝，不再回退默认浏览器。其他平台保持原有 Chrome/Chromium 发现方式。配套 Chrome 插件需提供 `openCaptureSession`。采集使用独立所有权，完成、取消后释放，不接管对话正在操作的标签。
 
 ## 产物与限制
 
