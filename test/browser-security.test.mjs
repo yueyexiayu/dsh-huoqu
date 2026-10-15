@@ -19,8 +19,8 @@ test("isolated Chrome: no business clicks, no local file read, including live-HT
   let snapshotFailure = false;
   const captureUrl = new URL("../lib/capture.js", import.meta.url).href;
   const browserUrl = new URL("../../chrome/lib/browser.js", import.meta.url).href;
-  const injected = "const cdp = new ChromeDevTools(socket);";
-  const sendHook = "const cdp = new ChromeDevTools(socket); const originalSend = cdp.send.bind(cdp); cdp.send = (method, ...args) => method === 'Page.captureSnapshot' && globalThis.__huoquSnapshotFailure ? Promise.reject(new Error('Synthetic snapshot failure')) : originalSend(method, ...args);";
+  const injected = "cdp = new ChromeDevTools(socket);";
+  const sendHook = "cdp = new ChromeDevTools(socket); const originalSend = cdp.send.bind(cdp); cdp.send = (method, ...args) => method === 'Page.captureSnapshot' && globalThis.__huoquSnapshotFailure ? Promise.reject(new Error('Synthetic snapshot failure')) : originalSend(method, ...args);";
   const hook = registerHooks({
     load(url, context, next) {
       if (url === browserUrl) return { format: "module", shortCircuit: true, source: "export async function openCaptureSession() { throw new Error('Synthetic isolation: companion disabled'); }" };
@@ -51,9 +51,14 @@ test("isolated Chrome: no business clicks, no local file read, including live-HT
     for (snapshotFailure of [false, true]) for (const nestedStyle of [false, true]) {
       globalThis.__huoquSnapshotFailure = snapshotFailure;
       const outputDir = path.join(dir, `${snapshotFailure ? "fallback" : "snapshot"}-${nestedStyle ? "nested-style" : "safe"}`);
-      const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/${nestedStyle ? "nested-style" : ""}`, output_dir: outputDir, wait_seconds: 0 });
+      const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/${nestedStyle ? "nested-style" : ""}`, purpose: "web-regression", backend: "headless", output_dir: outputDir, wait_seconds: 0 }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `security-${snapshotFailure}-${nestedStyle}` } });
       const report = JSON.parse(await readFile(path.join(outputDir, "report.json"), "utf8"));
       const html = await readFile(result.indexHtml, "utf8");
+      assert.equal(result.browserExecution.mode, "headless"); assert.equal(result.browserExecution.ownership, "owned-process");
+      assert.equal(result.browserExecution.actualIdentity, "anonymous"); assert.equal(result.browserExecution.engine.browserVersion, "145.0.7632.6");
+      assert.equal(result.browserExecution.runtimeVersion.product, "HeadlessChrome/145.0.7632.6");
+      assert.equal(result.browserExecution.policyPackage.version, "0.2.1-alpha.2.browser-policy.1");
+      assert.deepEqual(result.browserExecution.scope, result.verificationBrowserExecution.scope);
       assert.equal(requests, 0, "capture must not click business buttons");
       if (nestedStyle) {
         assert.equal(report.sourcePage.dataStylesheetColor, "rgb(1, 2, 3)", "fixture must exercise a real data stylesheet online");
@@ -69,7 +74,7 @@ test("isolated Chrome: no business clicks, no local file read, including live-HT
       assert.doesNotMatch(html, /<script\b|\son(?:click|load)\s*=/i);
       assert.ok(!html.includes(sentinel), "no local file bytes may enter the capture");
       if (snapshotFailure) assert.match(result.warnings.join("\n"), /Synthetic snapshot failure/);
-      console.log(JSON.stringify({ mode: snapshotFailure ? "live-html-fallback" : "mhtml-snapshot", nestedStyle, status: result.status, businessRequests: requests, localTitle: report.localCopy.preview.title, offlineStyle: report.localCopy.preview.dataStylesheetColor }));
+      console.log(JSON.stringify({ mode: snapshotFailure ? "live-html-fallback" : "mhtml-snapshot", nestedStyle, status: result.status, browserExecution: result.browserExecution, verificationBrowserExecution: result.verificationBrowserExecution, businessRequests: requests, localTitle: report.localCopy.preview.title, offlineStyle: report.localCopy.preview.dataStylesheetColor }));
     }
   } finally {
     hook.deregister();

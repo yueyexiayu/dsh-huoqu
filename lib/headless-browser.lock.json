@@ -1,0 +1,33 @@
+{
+  "packageName": "playwright-core",
+  "packageVersion": "1.58.2",
+  "browserName": "chromium-headless-shell",
+  "revision": "1208",
+  "browserVersion": "145.0.7632.6",
+  "platform": "darwin",
+  "arch": "arm64",
+  "minimumDarwinMajor": 22,
+  "directory": "chrome-headless-shell-mac-arm64",
+  "executable": "chrome-headless-shell",
+  "source": "https://cdn.playwright.dev/builds/cft/145.0.7632.6/mac-arm64/chrome-headless-shell-mac-arm64.zip",
+  "digestProvenance": "Locally calculated SHA-256 of the official Playwright CLI installation; these are verification measurements, not upstream signatures. Verified on macOS 27.0.1 arm64.",
+  "files": {
+    "ABOUT": "34d078ce3003087a8374e7c6156fda374769b8047d6ddaf419d66414aa48edfb",
+    "LICENSE.headless_shell": "0f7eb0bbe8a864c61984caec3a3e94ad4abfaf7c143c1214ca9f05455f1b621b",
+    "chrome-headless-shell": "a46b3b1e63163fa2d2437fb6ae967cb5a73b50050bca32f1964e6129b6228244",
+    "headless_command_resources.pak": "50b39d4838a76600c7491ee8fca5b8718569f8a3c122c861eedeefdcd2ef5a16",
+    "headless_lib_data.pak": "9064dfbf09c1f19b078fbc16b92db06e67ef62d9b69a297bc9b6a2f1b7dbfeb4",
+    "headless_lib_strings.pak": "618d16f1f79476528fedf1e7d03ceba7eb2569a7267937435d9642476e6f7858",
+    "icudtl.dat": "1cf67874b5a87a8363a86fb3f81e3cbbed54d389062dab8fb52308d5cf8c8612",
+    "libEGL.dylib": "21ca2c7e32bd1663bdd647b8ceb634c87dcddab677d200add23026744ce8b2b8",
+    "libGLESv2.dylib": "fdd668bdc595296535bcec4fb58ddbba5e0285b9ff53a7c6962974c3f7fc6e41",
+    "libvk_swiftshader.dylib": "0c1c7f16373805bb601831b4bc947815b701716f5827d8b5fd1c775f253af490",
+    "v8_context_snapshot.arm64.bin": "7827dcd565c92cc03dd312e84436c8831a23f7be3b132c281750431977c211c5",
+    "vk_swiftshader_icd.json": "d717d915e31e7c27948b80b36ab34e2d897888114c5c7d0af835f93eb53e58f5",
+    "PrivacySandboxAttestationsPreloaded/manifest.json": "51c311a4ba03140bcd1c827f8d93dba50cadda736925903b26e95609275dbffd",
+    "PrivacySandboxAttestationsPreloaded/privacy-sandbox-attestations.dat": "59e345dc13aedee9ea46b92e58300ecaca944aaea9384c7af885400ac2ae8806",
+    "resources/accessibility/reading_mode_gdocs_helper/content.js": "8d23bbffe429bf823e99e89da755996f2c5ee1594b926b81bba0eb6d0ab4e745",
+    "resources/accessibility/reading_mode_gdocs_helper/gdocs_script.js": "d291adabcfcb1a4a4a2ffacdd9d04fdb473ab0d6903556bef7446be9c3646d86",
+    "resources/accessibility/reading_mode_gdocs_helper_manifest.json": "9661d58cfdc4bd81b7fe35a6dfdcc6ccf0af28da53b1feb1ec8cf5b8a3476d7e"
+  }
+}

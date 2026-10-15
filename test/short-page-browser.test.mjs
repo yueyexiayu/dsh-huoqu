@@ -13,7 +13,7 @@ for (const fallback of [false, true]) for (const standards of [false, true]) {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'huoqu-short-page-browser-'));
     const captureUrl = new URL(`../lib/capture.js?short-page=${fallback}-${standards}`, import.meta.url).href;
     const browserUrl = new URL('../../chrome/lib/browser.js', import.meta.url).href;
-    const injected = 'const cdp = new ChromeDevTools(socket);';
+    const injected = 'cdp = new ChromeDevTools(socket);';
     const hook = registerHooks({
       load(url, context, next) {
         if (url === browserUrl) return { format: 'module', shortCircuit: true, source: "export async function openCaptureSession() { throw new Error('Isolated short-page regression only'); }" };
@@ -30,9 +30,14 @@ for (const fallback of [false, true]) for (const standards of [false, true]) {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     try {
       const { capturePage } = await import(captureUrl);
-      const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/short`, output_dir: path.join(dir, 'capture'), width: 800, height: 600, wait_seconds: 0 });
+      const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/short`, purpose: 'web-regression', backend: 'headless', output_dir: path.join(dir, 'capture'), width: 800, height: 600, wait_seconds: 0 }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `short-${fallback}-${standards}` } });
       const report = JSON.parse(await readFile(path.join(result.outputDir, 'report.json'), 'utf8'));
       assert.equal(result.status, 'completed');
+      assert.equal(result.pluginVersion, '0.2.0'); assert.equal(result.browserExecution.backend, 'cdp-websocket');
+      assert.equal(result.browserExecution.mode, 'headless'); assert.equal(result.browserExecution.actualIdentity, 'anonymous');
+      assert.equal(result.browserExecution.runtimeVersion.product, 'HeadlessChrome/145.0.7632.6');
+      assert.equal(result.browserExecution.policyPackage.version, '0.2.1-alpha.2.browser-policy.1');
+      assert.deepEqual(result.browserExecution.scope, result.verificationBrowserExecution.scope);
       assert.ok(report.sourcePage.document.htmlBytes < 1000);
       assert.ok(report.sourcePage.document.textLength > 20);
       for (const key of ['networkFailures', 'archiveNetworkFailures', 'htmlIssues', 'archiveIssues']) assert.deepEqual(report.offlineValidation[key], []);

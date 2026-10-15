@@ -148,22 +148,37 @@ test("transaction guards both rename endpoints and policy rejection restores old
 // rendering waits, keeping capturePage, cleanup, filesystem and locks intact.
 async function captureHarness() {
   const moduleUrl = new URL("../lib/capture.js", import.meta.url);
-  const source = (await fs.readFile(moduleUrl, "utf8")).replace(/from "(\.\.?\/[^\"]+)"/g,
+  const source = (await fs.readFile(moduleUrl, "utf8"))
+    .replace('import { resolveHeadlessBrowser } from "./headless-browser.js";', 'let resolveHeadlessBrowser;')
+    .replace(/from "(\.\.?\/[^\"]+)"/g,
     (_, relative) => `from ${JSON.stringify(new URL(relative, moduleUrl).href)}`);
   const hooks = `\nexport { openChrome, stopChrome, OUTPUT_LOCKS, readDocumentHtml, withoutSavedFileRejections, canonicalOutputDir };
+    const fixtureEngine = { kind: 'chromium-headless-shell', resolver: 'fixture-I/O', executablePath: '/fixture/chrome', browserVersion: '145.0.7632.6', capabilities: ['dom', 'screenshot'] };
     export function useLaunch(reserve) {
-      chromePath = async () => '/fixture/chrome';
+      resolveHeadlessBrowser = () => fixtureEngine;
       reservePort = reserve;
       delay = async () => {};
     }
-    export function useBrowser(browser) {
-      openBrowser = async () => browser;
+    export function useBrowser(browser, verificationBrowser) {
+      openBrowser = async (_signal, _access, options, operation) => {
+        browser.execution = captureExecution(options, operation, { identity: browser.mode === 'extension' ? 'current' : 'anonymous' });
+        browser.engine = browser.mode === 'extension' ? { ...fixtureEngine, kind: 'external-browser', capabilities: ['dom', 'screenshot', 'authenticated-state'] } : fixtureEngine;
+        browser.backend = browser.mode === 'extension' ? 'chrome-extension' : 'cdp-websocket';
+        return browser;
+      };
+      openChrome = async ({ execution }) => Object.assign(verificationBrowser, { execution, engine: fixtureEngine, backend: 'cdp-websocket' });
       delay = async () => {};
       settlePage = async () => ({ scrollHeight: 100, scrollSteps: 1 });
       waitForNetworkQuiet = async () => {};
     }
     export function useResolver(fn) { resolveHostname = fn; }`;
-  return import(`data:text/javascript;base64,${Buffer.from(source + hooks).toString("base64")}#${Math.random()}`);
+  const mod = await import(`data:text/javascript;base64,${Buffer.from(source + hooks).toString("base64")}#${Math.random()}`);
+  const operation = { cwd: process.cwd(), scope: { sessionId: 'capture-unit', taskId: `batch-${Math.random()}` } };
+  return { ...mod,
+    capturePage: (input, signal, access, context = operation) => mod.capturePage(input, signal, access, context),
+    openChrome: (options = {}) => mod.openChrome({ operation, execution: { scope: operation.scope, purpose: 'capture', mode: 'headless', ownership: 'owned-process', capabilities: ['dom', 'screenshot'] }, ...options }),
+    useBrowser: browser => mod.useBrowser(browser, browser.makeVerifier()),
+  };
 }
 
 for (const size of ["short", "chunked"]) {
@@ -209,8 +224,32 @@ for (const size of ["short", "chunked"]) {
   }
 }
 
+test("borrowed source preserves viewport/UA while offline controls belong only to an owned verifier", async () => {
+  await temporaryDirectory(async dir => {
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser();
+    mod.useBrowser(browser);
+    const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir, width: 900, height: 700 });
+    assert.equal(result.pluginVersion, "0.2.0");
+    assert.equal(state.navigations, 1);
+    assert.equal(state.verifier.navigations, 2);
+    assert.equal(state.closes, 1); assert.equal(state.verifier.closes, 1);
+    const viewport = state.methods.find(call => call.method === "Emulation.setDeviceMetricsOverride");
+    assert.equal(viewport.params.width, 900); assert.equal(viewport.params.height, 700);
+    for (const method of ["Emulation.setScriptExecutionDisabled", "Network.setCacheDisabled", "Network.setBypassServiceWorker", "Network.emulateNetworkConditions"]) {
+      assert.equal(state.methods.some(call => call.method === method), false, `${method} cannot mutate borrowed Chrome`);
+      assert.equal(state.verifier.methods.some(call => call.method === method), true, `${method} must protect offline owned preview`);
+    }
+    assert.equal(state.methods.some(call => call.method === "Network.setUserAgentOverride"), false);
+    assert.equal(result.browserExecution.actualIdentity, "current");
+    assert.equal(result.browserExecution.backend, "chrome-extension");
+    assert.equal(result.verificationBrowserExecution.actualIdentity, "anonymous");
+    assert.deepEqual(result.browserExecution.scope, result.verificationBrowserExecution.scope);
+  });
+});
+
 function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", summary: summaryOverrides = {}, responses = [], fileResponses = [] } = {}) {
-  const state = { closes: 0, navigations: 0, stopped: 0 };
+  const state = { closes: 0, navigations: 0, stopped: 0, methods: [] };
   const listeners = new Set();
   const browser = {
     mode,
@@ -220,6 +259,7 @@ function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fi
       onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       waitForEvent: async () => ({}),
       send: async (method, params) => {
+        state.methods.push({ method, params });
         if (method === "Target.createTarget") return { targetId: "fixture" };
         if (method === "Target.attachToTarget") return { sessionId: "fixture" };
         if (method === "Target.closeTarget") throw new Error("unsupported by extension");
@@ -241,6 +281,11 @@ function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fi
         return {};
       },
     },
+  };
+  browser.makeVerifier = () => {
+    const verifier = fixtureBrowser({ mode: 'headless', html, snapshot, summary: summaryOverrides, responses, fileResponses });
+    state.verifier = verifier.state;
+    return verifier.browser;
   };
   return { browser, state };
 }
@@ -264,7 +309,7 @@ for (const mode of ["extension", "headless"]) {
       const report = JSON.parse(await fs.readFile(path.join(dir, "report.json"), "utf8"));
       assert.equal(report.offlineValidation.result, "passed");
       assert.ok(report.archive.bytes < 1000);
-      assert.equal(state.navigations, 3);
+      assert.equal(state.navigations + (state.verifier?.navigations || 0), 3);
       assert.equal(mod.OUTPUT_LOCKS.size, 0);
     });
   });
@@ -301,7 +346,7 @@ test("cleanup failure rejects a fully rendered capture before report or promotio
     const { browser, state } = fixtureBrowser({ closeError: "CLOSE_REJECTED" });
     mod.useBrowser(browser);
     await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: dir }), /CLOSE_REJECTED/);
-    assert.equal(state.navigations, 3, "source and both previews ran before cleanup");
+    assert.equal(state.navigations + (state.verifier?.navigations || 0), 3, "source and both previews ran before cleanup");
     assert.equal(state.closes, 1);
     assert.equal(await fs.readFile(path.join(dir, "index.html"), "utf8"), "original page");
     assert.equal(JSON.parse(await fs.readFile(path.join(dir, "report.json"), "utf8")).status, undefined);
@@ -436,7 +481,7 @@ test("capture allows an explicitly requested private host and rejects a differen
     mod.useBrowser(allowed.browser);
     const result = await mod.capturePage({ url: "http://127.0.0.1/", output_dir: dir });
     assert.equal(result.status, "completed");
-    assert.equal(allowed.state.navigations, 3);
+    assert.equal(allowed.state.navigations + (allowed.state.verifier?.navigations || 0), 3);
   });
   await temporaryDirectory(async (dir) => {
     const mod = await captureHarness();

@@ -1,10 +1,22 @@
 {
   "name": "huoqu",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "private": true,
   "description": "DSH plugin: capture rendered webpages into local offline HTML and MHTML copies.",
   "type": "module",
   "main": "lib/index.js",
+  "dependencies": {
+    "@deepseek-ai/cordis": "file:vendor/browser-execution/deepseek-ai-cordis-4.0.5-alpha.1.tgz",
+    "@deepseek-ai/cosmokit": "file:vendor/browser-execution/deepseek-ai-cosmokit-1.8.6-alpha.1.tgz",
+    "@deepseek-ai/dsh-brand": "file:vendor/browser-execution/deepseek-ai-dsh-brand-0.2.1-alpha.2.tgz",
+    "@deepseek-ai/dsh-browser-use": "file:vendor/browser-execution/deepseek-ai-dsh-browser-use-0.2.1-alpha.2.browser-policy.1.tgz",
+    "@standard-schema/spec": "file:vendor/browser-execution/standard-schema-spec-1.1.0.tgz",
+    "playwright-core": "1.58.2"
+  },
+  "scripts": {
+    "install:headless": "playwright-core install chromium-headless-shell",
+    "test": "node --test test/*.test.mjs"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",

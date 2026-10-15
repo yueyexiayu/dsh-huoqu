@@ -49,7 +49,7 @@ for (const snapshotFailure of [false, true]) for (const rejectStyles of [false, 
   // A fresh module URL per case prevents a cached CDP hook from selecting the wrong mode.
   const captureUrl = new URL(`../lib/capture.js?svg-paint=${snapshotFailure}-${rejectStyles}`, import.meta.url).href;
   const browserUrl = new URL("../../chrome/lib/browser.js", import.meta.url).href;
-  const injected = "const cdp = new ChromeDevTools(socket);";
+  const injected = "cdp = new ChromeDevTools(socket);";
   const sendHook = `${injected} const originalSend = cdp.send.bind(cdp); cdp.send = (method, ...args) => method === 'Page.captureSnapshot' && ${snapshotFailure} ? Promise.reject(new Error('Synthetic SVG snapshot failure')) : originalSend(method, ...args);`;
   const hook = registerHooks({ load(url, context, next) {
     if (url === browserUrl) return { format: "module", shortCircuit: true, source: "export async function openCaptureSession() { throw new Error('Isolated regression browser only'); }" };
@@ -74,7 +74,7 @@ for (const snapshotFailure of [false, true]) for (const rejectStyles of [false, 
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     const { capturePage } = await import(captureUrl);
-    const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/`, output_dir: path.join(dir, "capture"), width: 800, height: 600, wait_seconds: 0 });
+    const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/`, purpose: "web-regression", backend: "headless", output_dir: path.join(dir, "capture"), width: 800, height: 600, wait_seconds: 0 }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `svg-${snapshotFailure}-${rejectStyles}` } });
     const report = JSON.parse(await readFile(path.join(dir, "capture/report.json"), "utf8"));
     const source = await readFile(path.join(dir, "capture/source.png"));
     const local = await readFile(path.join(dir, "capture/local.png"));

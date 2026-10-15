@@ -24,7 +24,7 @@ const hook = registerHooks({
       format: "module", shortCircuit: true,
       source: `import { currentOwner } from ${JSON.stringify(ownerUrl)};
         import { normalizeCaptureOptions } from ${JSON.stringify(parseUrl)};
-        export async function capturePage(input, signal, access) {
+        export async function capturePage(input, signal, access, operation) {
           const options = normalizeCaptureOptions(input);
           await access.assertWrite(options.outputDir);
           signal.throwIfAborted();
@@ -32,7 +32,7 @@ const hook = registerHooks({
           if (input.url.endsWith('/hold')) await new Promise((resolve, reject) => {
             signal.addEventListener('abort', () => reject(signal.reason), {once: true});
           });
-          return {ok: !input.url.endsWith('/partial'), status: input.url.endsWith('/partial') ? 'partial' : 'completed', title: currentOwner(), waitSeconds: options.waitSeconds, indexHtml: '/tmp/huoqu/index.html', warnings: []};
+          return {ok: !input.url.endsWith('/partial'), status: input.url.endsWith('/partial') ? 'partial' : 'completed', title: currentOwner(), operation, waitSeconds: options.waitSeconds, indexHtml: '/tmp/huoqu/index.html', warnings: []};
         }`,
     };
   },
@@ -82,6 +82,9 @@ const start = async (suffix, extra = {}) => {
 test("Host tool preserves ownership and resolves the calling session policy", async () => {
   const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture" }, { agent: { session } });
   assert.equal(result.title, "session-fixture");
+  assert.equal(result.operation.cwd, session.header.cwd);
+  assert.equal(result.operation.scope.sessionId, session.id);
+  assert.ok(result.operation.scope.taskId);
   assert.deepEqual(policyRequests.at(-1), { session });
   assert.ok(fsTargets.includes("/tmp/fixture"));
 });
@@ -95,9 +98,11 @@ test("capture jobs have distinct owners, preserve wait_seconds and partial valid
   assert.equal(partial.result.ok, false);
   assert.equal(partial.result.status, "partial");
   assert.equal(partial.result.waitSeconds, 17);
-  assert.equal(partial.result.title, `huoqu-job:${first.jobId}`);
-  assert.equal(good.result.title, `huoqu-job:${second.jobId}`);
-  assert.notEqual(partial.result.title, good.result.title);
+  assert.equal(partial.result.title, session.id);
+  assert.equal(good.result.title, session.id);
+  assert.deepEqual(partial.result.operation, { cwd: session.header.cwd, scope: { sessionId: session.id, taskId: first.jobId } });
+  assert.deepEqual(good.result.operation, { cwd: session.header.cwd, scope: { sessionId: session.id, taskId: second.jobId } });
+  assert.notEqual(partial.result.operation.scope.taskId, good.result.operation.scope.taskId);
   assert.deepEqual(policyRequests.at(-1), { session });
   const failed = await settled((await start("failed")).jobId);
   assert.equal(failed.status, "failed");
@@ -142,7 +147,8 @@ test("sidebar capture uses the loaded conversation policy instead of deployment 
     const job = await started.json();
     const done = await settled(job.jobId, full.id);
     assert.equal(done.status, "completed");
-    assert.equal(done.result.title, `huoqu-job:${job.jobId}`);
+    assert.equal(done.result.title, full.id);
+    assert.deepEqual(done.result.operation, { cwd: full.header.cwd, scope: { sessionId: full.id, taskId: job.jobId } });
     const seen = policyRequests.slice(before);
     assert.ok(seen.length >= 2);
     assert.ok(seen.every((request) => request.session === full));

@@ -19,6 +19,38 @@ test("normalized options remain stable across the HTTP and capture boundary", ()
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", waitSeconds: 21 }), /wait_seconds/);
 });
 
+test("capture defaults preserve current Chrome identity without silent anonymous fallback", () => {
+  const options = normalizeCaptureOptions({ url: "https://example.test/" });
+  assert.equal(options.purpose, "capture");
+  assert.equal(options.backend, "auto");
+  assert.equal(options.browserIdentity, "current");
+});
+
+test("automation and web regression default to isolated anonymous headless", () => {
+  for (const purpose of ["automation", "web-regression"]) {
+    const options = normalizeCaptureOptions({ url: "https://example.test/", purpose });
+    assert.equal(options.browserIdentity, "anonymous");
+    assert.equal(options.backend, "auto");
+    assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", purpose, browser_identity: "current" }), /headless|anonymous/);
+    assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", purpose, backend: "current-chrome" }), /headless|current-chrome/);
+  }
+});
+
+test("identity and backend combinations fail explicitly rather than change identity", () => {
+  for (const [backend, browser_identity] of [["headless", "current"], ["current-chrome", "anonymous"]]) {
+    assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", backend, browser_identity }), /identity|anonymous|current/);
+  }
+  const options = normalizeCaptureOptions({ url: "https://example.test/", browser_identity: "prefer-current" });
+  assert.equal(options.browserIdentity, "prefer-current");
+  assert.deepEqual(normalizeCaptureOptions(options), options);
+});
+
+test("capture rejects unsupported purposes and execution owner injection", () => {
+  for (const input of [{ purpose: "desktop-regression" }, { backend: "chrome.app" }, { browser_identity: "stolen" }, { scope: { sessionId: "other" } }, { execution: {} }, { cwd: "/other" }, { ownership: "owned-process" }]) {
+    assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", ...input }), /purpose|backend|identity|owner|scope|execution|cwd/);
+  }
+});
+
 test("normalizeCaptureOptions rejects non-HTTP and credentialed URLs", () => {
   assert.throws(() => normalizeCaptureOptions({ url: "file:///etc/passwd" }), /http and https/);
   assert.throws(() => normalizeCaptureOptions({ url: "https://user:secret@example.test/" }), /must not contain credentials/);

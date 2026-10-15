@@ -37,7 +37,15 @@ test("host entry registers huoqu tool and the declared route", async () => {
   assert.doesNotMatch(rendered[0].text, /副本已生成并通过离线检查/);
   assert.match(rendered[0].text, /静态渲染副本/);
   assert.doesNotMatch(rendered[0].text, /保留原站脚本和组件/);
-  assert.match(tool.description, /static rendered/);
+  assert.match(tool.description, /static offline HTML\/MHTML/);
+  assert.match(tool.description, /never silent anonymous fallback/);
+  assert.deepEqual(tool.parameters.properties.purpose.enum, ["capture", "automation", "web-regression"]);
+  assert.deepEqual(tool.parameters.properties.backend.enum, ["auto", "current-chrome", "headless"]);
+  assert.deepEqual(tool.parameters.properties.browser_identity.enum, ["current", "anonymous", "prefer-current"]);
+  assert.equal(tool.output.schema.properties.browserExecution.type, "object");
+  assert.equal(tool.output.schema.properties.verificationBrowserExecution.type, "object");
+  const list = await route.fetch(new Request("http://dsh.local/api/huoqu?sessionId=fixture"));
+  assert.equal((await list.json()).version, "0.2.0");
   assert.doesNotMatch(tool.description, /retaining scripts/);
   assert.match(rendered[0].text, /图片未加载/);
 });
