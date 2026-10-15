@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { browserPolicyPackage, headlessBrowserLock } from "./package-fixture.mjs";
 
 // Opt in: runs a real isolated Chrome, never the user's logged-in browser.
 // HUOQU_BROWSER_TESTS=1 node --test test/browser-security.test.mjs
@@ -55,9 +56,9 @@ test("isolated Chrome: no business clicks, no local file read, including live-HT
       const report = JSON.parse(await readFile(path.join(outputDir, "report.json"), "utf8"));
       const html = await readFile(result.indexHtml, "utf8");
       assert.equal(result.browserExecution.mode, "headless"); assert.equal(result.browserExecution.ownership, "owned-process");
-      assert.equal(result.browserExecution.actualIdentity, "anonymous"); assert.equal(result.browserExecution.engine.browserVersion, "145.0.7632.6");
-      assert.equal(result.browserExecution.runtimeVersion.product, "HeadlessChrome/145.0.7632.6");
-      assert.equal(result.browserExecution.policyPackage.version, "0.2.1-alpha.2.browser-policy.1");
+      assert.equal(result.browserExecution.actualIdentity, "anonymous"); assert.equal(result.browserExecution.engine.browserVersion, headlessBrowserLock.browserVersion);
+      assert.equal(result.browserExecution.runtimeVersion.product, `HeadlessChrome/${headlessBrowserLock.browserVersion}`);
+      assert.equal(result.browserExecution.policyPackage.version, browserPolicyPackage.version);
       assert.deepEqual(result.browserExecution.scope, result.verificationBrowserExecution.scope);
       assert.equal(requests, 0, "capture must not click business buttons");
       if (nestedStyle) {

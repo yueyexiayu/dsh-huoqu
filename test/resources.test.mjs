@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { htmlToMhtml, materializeMhtml } from "../lib/archive.js";
+import { absolutizeRelativeImports } from "./module-fixture.mjs";
 
 // Expose real private functions in memory, without copying their implementation.
 const moduleUrl = new URL("../lib/capture.js", import.meta.url);
-const source = (await readFile(moduleUrl, "utf8")).replace(/from "(\.\/[^\"]+)"/g,
-  (_all, relative) => `from ${JSON.stringify(new URL(relative, moduleUrl).href)}`);
+const source = absolutizeRelativeImports(await readFile(moduleUrl, "utf8"), moduleUrl);
 const { fetchExtraResource, completeExternalResources, readResponseLimited } = await import(
   `data:text/javascript;base64,${Buffer.from(`${source}\nexport { fetchExtraResource, completeExternalResources, readResponseLimited };`).toString("base64")}`);
 

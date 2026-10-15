@@ -6,6 +6,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseMhtml } from '../lib/archive.js';
+import { pluginPackage, browserPolicyPackage, headlessBrowserLock } from './package-fixture.mjs';
 
 const enabled = process.env.HUOQU_BROWSER_TESTS === '1';
 for (const fallback of [false, true]) for (const standards of [false, true]) {
@@ -33,10 +34,11 @@ for (const fallback of [false, true]) for (const standards of [false, true]) {
       const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/short`, purpose: 'web-regression', backend: 'headless', output_dir: path.join(dir, 'capture'), width: 800, height: 600, wait_seconds: 0 }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `short-${fallback}-${standards}` } });
       const report = JSON.parse(await readFile(path.join(result.outputDir, 'report.json'), 'utf8'));
       assert.equal(result.status, 'completed');
-      assert.equal(result.pluginVersion, '0.2.0'); assert.equal(result.browserExecution.backend, 'cdp-websocket');
+      assert.equal(result.pluginVersion, pluginPackage.version); assert.equal(report.pluginVersion, pluginPackage.version);
+      assert.equal(result.browserExecution.backend, 'cdp-websocket');
       assert.equal(result.browserExecution.mode, 'headless'); assert.equal(result.browserExecution.actualIdentity, 'anonymous');
-      assert.equal(result.browserExecution.runtimeVersion.product, 'HeadlessChrome/145.0.7632.6');
-      assert.equal(result.browserExecution.policyPackage.version, '0.2.1-alpha.2.browser-policy.1');
+      assert.equal(result.browserExecution.runtimeVersion.product, `HeadlessChrome/${headlessBrowserLock.browserVersion}`);
+      assert.equal(result.browserExecution.policyPackage.version, browserPolicyPackage.version);
       assert.deepEqual(result.browserExecution.scope, result.verificationBrowserExecution.scope);
       assert.ok(report.sourcePage.document.htmlBytes < 1000);
       assert.ok(report.sourcePage.document.textLength > 20);

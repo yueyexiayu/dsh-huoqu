@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { API_PATH, apply, inject, name } from "../lib/index.js";
+import { pluginPackage } from "./package-fixture.mjs";
 
 test("host entry registers huoqu tool and the declared route", async () => {
   let tool;
@@ -45,7 +46,7 @@ test("host entry registers huoqu tool and the declared route", async () => {
   assert.equal(tool.output.schema.properties.browserExecution.type, "object");
   assert.equal(tool.output.schema.properties.verificationBrowserExecution.type, "object");
   const list = await route.fetch(new Request("http://dsh.local/api/huoqu?sessionId=fixture"));
-  assert.equal((await list.json()).version, "0.2.0");
+  assert.equal((await list.json()).version, pluginPackage.version);
   assert.doesNotMatch(tool.description, /retaining scripts/);
   assert.match(rendered[0].text, /图片未加载/);
 });

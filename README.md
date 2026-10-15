@@ -4,7 +4,7 @@
 
 在 DeepSeek Harness 里采集网页的当前渲染结果，保存为可离线打开的**静态副本**。
 
-当前插件版本 **0.2.1**。普通 `purpose=capture` 默认通过 [Chrome 插件](https://github.com/yueyexiayu/dsh-chrome) 复用当前正式 Chrome 的登录状态，并创建本任务独占的后台 capture target，不另开调试端口、不接管用户已有标签。**兼容性变化：默认身份为 `current`；扩展缺失或不可用时明确失败，不再悄悄变成匿名访问。**无头依赖固定为本插件安装的 `playwright-core@1.58.2` 对应专用 Chromium headless shell（revision `1208`，真实版本 `145.0.7632.6`），不扫描其他项目、不选择缓存最高 revision、不跨架构借用。缺失或验证失败明确报错，绝不回退 Google Chrome.app/Chromium.app。配套 Chrome 插件需提供 `openCaptureSession`。采集使用独立所有权，完成、取消后释放，不接管对话正在操作的标签。
+当前插件版本 **0.2.2**。普通 `purpose=capture` 默认通过 [Chrome 插件](https://github.com/yueyexiayu/dsh-chrome) 复用当前正式 Chrome 的登录状态，并创建本任务独占的后台 capture target，不另开调试端口、不接管用户已有标签。**兼容性变化：默认身份为 `current`；扩展缺失或不可用时明确失败，不再悄悄变成匿名访问。**无头依赖固定为本插件安装的 `playwright-core@1.58.2` 对应专用 Chromium headless shell（revision `1208`，真实版本 `145.0.7632.6`），不扫描其他项目、不选择缓存最高 revision、不跨架构借用。缺失或验证失败明确报错，绝不回退 Google Chrome.app/Chromium.app。配套 Chrome 插件需提供 `openCaptureSession`。采集使用独立所有权，完成、取消后释放，不接管对话正在操作的标签。
 
 ### 用途、身份与隔离
 
@@ -82,7 +82,7 @@ macOS 打开本地文件会等待 `open` 的退出状态；失败会显示错误
       name: ../../plugins/huoqu/lib/index.js
 ```
 
-完全退出 DeepSeek Harness（macOS：⌘Q）再打开并建立新会话，侧栏会出现「网页获取」。Host 修改和新工具 schema 需要重启/新会话才能加载；仅保存源码并不会更新正在运行的 Host。以当前会话的侧栏 GET `version: "0.2.1"`、新工具 purpose/backend/browser_identity schema 及 capture 结果 `pluginVersion: "0.2.1"` 核对实际加载版本，不能以源码单测代替已部署验收。
+完全退出 DeepSeek Harness（macOS：⌘Q）再打开并建立新会话，侧栏会出现「网页获取」。Host 修改和新工具 schema 需要重启/新会话才能加载；仅保存源码并不会更新正在运行的 Host。以当前会话的侧栏 GET `version: "0.2.2"`、新工具 purpose/backend/browser_identity schema 及 capture 结果 `pluginVersion: "0.2.2"` 核对实际加载版本，不能以源码单测代替已部署验收。
 
 ## 0.1.1 修复
 

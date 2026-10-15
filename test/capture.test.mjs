@@ -8,6 +8,8 @@ import { EventEmitter } from "node:events";
 import childProcess from "node:child_process";
 import vm from "node:vm";
 import { pathToFileURL } from "node:url";
+import { absolutizeRelativeImports } from "./module-fixture.mjs";
+import { pluginPackage } from "./package-fixture.mjs";
 
 // Exercise the existing transaction directly without starting a browser.
 import { capturePage, createOutputStage, finalizeStage } from "../lib/capture.js";
@@ -148,10 +150,8 @@ test("transaction guards both rename endpoints and policy rejection restores old
 // rendering waits, keeping capturePage, cleanup, filesystem and locks intact.
 async function captureHarness() {
   const moduleUrl = new URL("../lib/capture.js", import.meta.url);
-  const source = (await fs.readFile(moduleUrl, "utf8"))
-    .replace('import { resolveHeadlessBrowser } from "./headless-browser.js";', 'let resolveHeadlessBrowser;')
-    .replace(/from "(\.\.?\/[^\"]+)"/g,
-    (_, relative) => `from ${JSON.stringify(new URL(relative, moduleUrl).href)}`);
+  const source = absolutizeRelativeImports((await fs.readFile(moduleUrl, "utf8"))
+    .replace('import { resolveHeadlessBrowser } from "./headless-browser.js";', 'let resolveHeadlessBrowser;'), moduleUrl);
   const hooks = `\nexport { openChrome, stopChrome, OUTPUT_LOCKS, readDocumentHtml, withoutSavedFileRejections, canonicalOutputDir };
     const fixtureEngine = { kind: 'chromium-headless-shell', resolver: 'fixture-I/O', executablePath: '/fixture/chrome', browserVersion: '145.0.7632.6', capabilities: ['dom', 'screenshot'] };
     export function useLaunch(reserve) {
@@ -164,13 +164,20 @@ async function captureHarness() {
         browser.execution = captureExecution(options, operation, { identity: browser.mode === 'extension' ? 'current' : 'anonymous' });
         browser.engine = browser.mode === 'extension' ? { ...fixtureEngine, kind: 'external-browser', capabilities: ['dom', 'screenshot', 'authenticated-state'] } : fixtureEngine;
         browser.backend = browser.mode === 'extension' ? 'chrome-extension' : 'cdp-websocket';
+        if (browser.mode !== 'extension') fixtureOwnedHandle(browser, { cdp: browser.cdp });
         return browser;
       };
-      openChrome = async ({ execution }) => Object.assign(verificationBrowser, { execution, engine: fixtureEngine, backend: 'cdp-websocket' });
+      openChrome = async ({ execution }) => {
+        fixtureOwnedHandle(verificationBrowser, { cdp: verificationBrowser.cdp });
+        return Object.assign(verificationBrowser, { execution, engine: fixtureEngine, backend: 'cdp-websocket' });
+      };
       delay = async () => {};
       settlePage = async () => ({ scrollHeight: 100, scrollSteps: 1 });
       waitForNetworkQuiet = async () => {};
     }
+    // Synthetic browser I/O still uses the real owned-handle cleanup path. This
+    // registration exists only in the in-memory fixture, never in product code.
+    export function fixtureOwnedHandle(handle, record) { OWNED_CHROME.set(handle, record); return handle; }
     export function useResolver(fn) { resolveHostname = fn; }`;
   const mod = await import(`data:text/javascript;base64,${Buffer.from(source + hooks).toString("base64")}#${Math.random()}`);
   const operation = { cwd: process.cwd(), scope: { sessionId: 'capture-unit', taskId: `batch-${Math.random()}` } };
@@ -230,7 +237,9 @@ test("borrowed source preserves viewport/UA while offline controls belong only t
     const { browser, state } = fixtureBrowser();
     mod.useBrowser(browser);
     const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir, width: 900, height: 700 });
-    assert.equal(result.pluginVersion, "0.2.0");
+    assert.equal(result.pluginVersion, pluginPackage.version);
+    const report = JSON.parse(await fs.readFile(path.join(dir, "report.json"), "utf8"));
+    assert.equal(report.pluginVersion, pluginPackage.version);
     assert.equal(state.navigations, 1);
     assert.equal(state.verifier.navigations, 2);
     assert.equal(state.closes, 1); assert.equal(state.verifier.closes, 1);
@@ -388,19 +397,34 @@ test("Chrome termination timeout rejects and preserves a profile still used by i
     const signals = [];
     child.kill = (signal) => { signals.push(signal); return false; };
     await fs.writeFile(path.join(profile, "sentinel"), "preserved");
-    const originalKill = process.kill;
-    process.kill = (_pid, signal) => { signals.push(signal); return false; };
-    try {
-      await assert.rejects(mod.stopChrome({ child, profile }), (error) => {
-        assert.match(error.message, /退出超时/);
-        assert.ok(error.message.includes(profile));
-        return true;
-      });
-    } finally { process.kill = originalKill; }
+    // No process group is registered: only this EventEmitter's kill stub can
+    // receive signals, never process.kill or a real PID/process group.
+    const handle = mod.fixtureOwnedHandle({}, { child, profile });
+    await assert.rejects(mod.stopChrome(handle), (error) => {
+      assert.match(error.message, /退出超时/);
+      assert.ok(error.message.includes(profile));
+      return true;
+    });
     assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
     assert.equal(await fs.readFile(path.join(profile, "sentinel"), "utf8"), "preserved");
     assert.equal(child.listenerCount("exit"), 0);
     assert.equal(child.listenerCount("error"), 0);
+  });
+});
+
+test("Chrome cleanup rejects fabricated and copied owned handles before signaling or deleting", async () => {
+  await temporaryDirectory(async profile => {
+    const mod = await captureHarness();
+    const sentinel = path.join(profile, "sentinel");
+    await fs.writeFile(sentinel, "preserved");
+    const child = new EventEmitter();
+    child.pid = 12345; child.exitCode = null; child.signalCode = null;
+    child.kill = () => assert.fail("fabricated or copied handles must never signal a process");
+    const handle = mod.fixtureOwnedHandle({ child, profile, mode: "headless" }, { child, profile });
+    for (const fabricated of [{ child, profile }, { ...handle }]) {
+      await assert.rejects(mod.stopChrome(fabricated), /original owned handle or borrowed connection/);
+      assert.equal(await fs.readFile(sentinel, "utf8"), "preserved");
+    }
   });
 });
 
