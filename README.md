@@ -1,80 +1,48 @@
-# huoqu
+<div align="center">
+<img src="docs/repo-assets/hero.svg" width="100%" alt="网页渲染、静态保存与离线核验的原创示意，非采集结果截图" />
+<h1>huoqu · 把网页留在本地</h1>
+<p><strong>保存当前渲染状态，而不是假装复制整个网站。</strong></p>
+<p>DeepSeek Harness 的静态 HTML / MHTML 采集与离线核验插件。</p>
+<p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
+<p><a href="package.json">v0.2.2</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="#核心能力">核心能力</a> · <a href="#工作方式">工作方式</a> · <a href="#快速开始">快速开始</a> · <a href="#用途与身份">用途与身份</a> · <a href="#产物与边界">产物与边界</a> · <a href="#验证">验证</a></p>
+</div>
 
-当前项目是深度适配个人使用，项目只是给大家提供思路和借鉴，尽量不要直接照搬。
+---
 
-在 DeepSeek Harness 里采集网页的当前渲染结果，保存为可离线打开的**静态副本**。
+面向个人桌面工作流的参考实现。普通采集默认复用当前 Chrome 登录身份；自动化和网页回归使用自有、匿名的真正无头后端。身份不可用时明确失败，不悄悄把登录页面换成匿名页面。
 
-当前插件版本 **0.2.2**。普通 `purpose=capture` 默认通过 [Chrome 插件](https://github.com/yueyexiayu/dsh-chrome) 复用当前正式 Chrome 的登录状态，并创建本任务独占的后台 capture target，不另开调试端口、不接管用户已有标签。**兼容性变化：默认身份为 `current`；扩展缺失或不可用时明确失败，不再悄悄变成匿名访问。**无头依赖固定为本插件安装的 `playwright-core@1.58.2` 对应专用 Chromium headless shell（revision `1208`，真实版本 `145.0.7632.6`），不扫描其他项目、不选择缓存最高 revision、不跨架构借用。缺失或验证失败明确报错，绝不回退 Google Chrome.app/Chromium.app。配套 Chrome 插件需提供 `openCaptureSession`。采集使用独立所有权，完成、取消后释放，不接管对话正在操作的标签。
+## 核心能力
 
-### 用途、身份与隔离
+<table><tr>
+<td width="33%"><strong>🗃 离线静态副本</strong><br/><br/>保存 HTML、资源和 MHTML，不声称复制原站 API、登录态或交互功能。</td>
+<td width="33%"><strong>🌐 身份可追溯</strong><br/><br/>用途、后端、实际引擎、请求/实际身份、归属与降级原因写入报告。</td>
+<td width="33%"><strong>🧪 离线核验</strong><br/><br/>自有固定 shell 断网、禁 JS 检查 HTML/MHTML，输出源站与本地截图。</td>
+</tr><tr>
+<td><strong>🖼 资源本地化</strong><br/><br/>处理普通图片、CSS与可安全内联的 SVG paint；无法完整保存返回 partial。</td>
+<td><strong>🛡 会话文件策略</strong><br/><br/>复用官方 sandboxPolicy/fs，按真实 loaded Session 限制写入、替换及清理。</td>
+<td><strong>🧾 明确结果</strong><br/><br/>已落盘不等于通过；清理失败阻止发布，未知目录不覆盖，取消等待实际退出。</td>
+</tr></table>
 
-- `purpose`: `capture`（默认）、`automation`、`web-regression`。自动化与 Web 回归默认 `anonymous` + owned true headless，绝不借用用户 Chrome。
-- `backend`: `auto`（默认）、`current-chrome`、`headless`。auto 依用途/身份选择，不根据任意异常猜测后端。
-- `browser_identity`: 普通 capture 默认 `current`；自动化/Web 回归默认 `anonymous`。显式 `prefer-current` 表示允许匿名结果，仅真正 `CHROME_EXTENSION_UNAVAILABLE` 或可选 Chrome 模块不存在时降级，并报告具体原因。协议、旧扩展、权限、能力、实际浏览器版本/身份失败不降级。
-- `headless + current`、`current-chrome + anonymous`、自动化 + current 明确拒绝，不静默改模式或身份。
-- `width/height` 仍作用于本任务新建 capture target 的 CDP viewport，不移动或缩放用户原生窗口；Chrome 原真实 UA 保留。离线 HTML/MHTML 的禁 JS、缓存/service worker 和断网状态仅在自有固定 shell 中启用，不污染借用 target。匿名 source 可在本批次自有 shell 内验收，不跨任务继承状态。
-- scope 来自 Host 真实 loaded Session 和 task/job batch，operation cwd 显式传入；请求 wire 不能伪造 scope/cwd/ownership。Node 直接调用 `capturePage(input, signal, access, {cwd, scope:{sessionId,taskId}})` 也必须显式提供运行归属。
-- 结果及报告分别记录 source 与 verifier 的 scope、purpose、backend（extension 或 CDP WebSocket）、mode、ownership、请求/实际身份、实际 engine version 和降级原因。Source width/height 以实际 viewport 回执为准。MHTML/素材不复制登录凭据，额外匿名资源 fetch 无法获取的私有素材按失败报告。
+## 工作方式
 
-```json
-{"url":"https://example.com/","purpose":"web-regression","browser_identity":"anonymous","backend":"headless","output_dir":"/tmp/new-capture"}
-```
+![真实会话先确定浏览器身份，保存渲染快照，再在隔离 shell 中核验并报告结果。](docs/repo-assets/workflow.zh-CN.svg)
 
-### 固定无头依赖
+默认 capture 经[Chrome 插件](https://github.com/yueyexiayu/dsh-chrome)创建本任务独占的后台 target，不开调试端口、不接管现有标签。离线限制仅施加到自有 shell，不污染借用 Chrome。源站在线加载仍会执行源站自身脚本。
 
-在本插件目录执行：
+## 快速开始
+
+当前固定浏览器仅验收 macOS arm64；实际环境为 macOS27.0.1，Darwin major低于22拒绝。其他架构、Linux/Windows及其他 macOS 版本不宣称已验收。
 
 ```sh
-/usr/local/bin/node /usr/local/lib/node_modules/npm/bin/npm-cli.js ci --ignore-scripts
-# 安装到本插件 playwright-core 包内（不修改其他项目浏览器缓存）
-PLAYWRIGHT_BROWSERS_PATH=0 /usr/local/bin/node node_modules/playwright-core/cli.js install chromium-headless-shell
-# 启动 Host/测试时也必须提供同一个安装语义
-PLAYWRIGHT_BROWSERS_PATH=0 HUOQU_BROWSER_TESTS=1 /usr/local/bin/node --test test/*.test.mjs
+export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
+git clone https://github.com/yueyexiayu/dsh-huoqu.git "$DSH_HOME/plugins/huoqu"
+cd "$DSH_HOME/plugins/huoqu"
+npm ci --ignore-scripts
+npm run install:headless
 ```
 
-也可执行 `npm run install:headless`，使用 Playwright 默认缓存。`PLAYWRIGHT_BROWSERS_PATH` 未设置或为空字符串时使用 `~/Library/Caches/ms-playwright`；为 `0` 时使用本插件 `node_modules/playwright-core/.local-browsers`；绝对值使用指定缓存，相对值按**执行 cwd**解析，不按源码目录或其他项目解析。PATH=0、empty/unset 和环境变量取值优先级遵循固定 Playwright 包；同名变量优先，其次 `npm_config_playwright_browsers_path`，再其次 `npm_package_config_playwright_browsers_path`（空字符串也占优先级）。相对路径则按插件明确的 execution cwd 契约，**刻意忽略 `INIT_CWD`**，不声称与 npm 启动时 Playwright 的全部路径语义完全相同。所有模式只寻找固定的 `chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell`。
-
-`HUOQU_CHROME_PATH` 未设置时采用上述固定路径；显式为空、空白、失效或不兼容时失败，不再 fallback。有效 override 可指向另一处完整的相同固定安装（相对路径按执行 cwd）；仅重命名可执行文件、GUI `.app`、GUI symlink、其他版本均拒绝。解析验证 package/发布 browsers manifest、完成 marker、没有活动安装锁、原生 Mach-O arm64、全部17个安装文件 SHA-256 和实际 `--version`，不以文件名或 X_OK 冒充身份；每次批次解析检查，不在每个 CDP 操作重复 hash。
-
-兼容性变化：目前只有 macOS arm64 有固定校验 manifest，实际验收系统为 macOS 27.0.1；x64/Rosetta、Linux、Windows 明确 `unsupported/unverified`，不再沿用 GUI 自动发现。最低 Darwin major 门禁为22，低于该版本拒绝；其他 macOS 版本未做真实运行验收，不宣称已验收。
-
-版本来源为官方 npm `playwright-core@1.58.2` 的 `browsers.json`；npm 包由 `package-lock.json` 的 registry URL/SHA-512 integrity 固定。`lib/headless-browser.lock.json` 的资源 SHA-256 是本地对官方 CLI 下载字节计算并实际运行核验的**测量值**，不是上游签名；下载源为 `https://cdn.playwright.dev/builds/cft/145.0.7632.6/mac-arm64/chrome-headless-shell-mac-arm64.zip`。更新版本/增加平台必须同步固定 dependency/lock、官方 manifest 与完整安装测量值，在真实目标 OS/原生架构运行 DOM/截图/版本及无 GUI 验收后再开放；禁止根据缓存目录名自动扩兼容。
-
-## 产物与限制
-
-- 本地入口：`index.html`，资源目录：`assets/`
-- 单文件副本：`index.mhtml`
-- 截图与报告：`source.png`、`local.png`、`report.json`、`manifest.json`
-
-本地 HTML 和 MHTML 移除脚本、事件处理器、嵌入页面和主动跳转，添加限制性的 CSP；离线验证禁用 JavaScript，隔离浏览器不启用跨本地文件读取特权。**不会复制原站 API、登录态、脚本或交互功能。**
-
-采集滚动页面以加载懒加载内容，不自动点击通用按钮，也不调用原站轮播或 fullpage 翻页 API。尚未渲染、需要点击或接口请求才能出现的内容可能缺失。源站在线加载仍会运行源站自身的脚本。
-
-普通外部 SVG 图标和渐变、滤镜等 paint 定义会内联以减少离线加载限制，覆盖属性、内联 CSS、页面样式及捕获的普通外部样式表。含主动内容、重复 ID 或样式表（`style`、`link`、XML stylesheet）的 SVG 不晋升到宿主 DOM，避免污染整页；保留原外部引用，不通过删除样式伪造完整还原。复杂或不支持的引用不强行改写；无法本地化或离线加载失败会进入报告并返回 `partial`。
-
-输出目录必须为空，或能通过 `manifest.json`、`report.json` 及资源清单确认是既有 `huoqu` 副本。支持记录完整的旧版产物；无法确认归属时拒绝覆盖。不会仅凭 `index.html`、`assets/` 等文件名自动覆盖。替换失败时恢复旧内容；恢复失败则保留备份并报告位置。
-
-只有资源引用完整、离线 HTML/MHTML 预览成功、页面内容和图片检查通过，且浏览器清理成功，结果才标为 `completed`。已保存但检查未通过返回 `partial`，具体原因记录在 `report.json`。浏览器清理失败阻止新产物发布和旧副本替换；原错误与清理错误同时保留，进程退出超时则保留 profile 并报告路径。生成文件不等于验证通过。
-
-## DSH 权限与后台任务
-
-插件通过现有 `sandboxPolicy` 和 `fs` 服务检查所有输出事务及浏览器临时目录的写入、替换、回滚和清理；服务缺失或策略未知时拒绝运行，不自行提升权限。不需要修改 DSH 官方源码。
-
-- 工具调用使用当前会话的文件策略及工作区。
-- 侧栏采集会带上当前对话的 `sessionId`，并使用该会话已经生效的文件策略，不另造 `danger-full-access`，也不接受请求里的权限提升字段。未关联会话、或会话未加载时拒绝采集，不会悄悄退回 Host 默认策略。
-- 所有 HTTP 操作都必须传入有效 `sessionId`：GET 列表/状态使用查询参数；POST 采集、取消、打开及选择文件夹使用 JSON 字段。缺失、空白或畸形 ID 返回 400；不存在或仅在历史中、尚未加载的会话返回 403；服务不可用返回 503。不会主动加载历史会话，也不接受 agentless 工具调用或默认工作区回落。
-- `read-only` 拒绝采集；`workspace-write` 仅允许规范化后的工作区、`/tmp` 和平台临时目录；`danger-full-access` 不限制写入位置。
-- 默认输出在 `~/Downloads/huoqu/`。`workspace-write` 下该位置会被拒绝，应改到工作区或临时目录；当前会话为 `danger-full-access` 时可以写入。
-
-任务绑定创建时的 loaded Session 对象，列表、状态、取消及本地打开均只认同一归属；另一会话请求返回 404，不泄露 URL、路径和结果。卸载后重新加载同 ID 的会话也不继承旧对象的任务。排队执行及每次文件写入/回滚/清理前重新确认 live 身份并解析最新策略；收紧策略或卸载会话后，无法获准的清理不会绕过策略，错误会报告残留临时目录/浏览器 profile 的位置。只读模式仍允许查看、打开自己的既有结果及请求停止；停止浏览器和退出清理不使用原始授权缓存。侧栏切换会话会清空旧结果并丢弃迟到响应，缺少会话时禁用采集和目录选择。
-
-侧栏任务串行运行，最多保留 4 个运行或排队任务；排队开始 240 秒后请求停止，并等待清理退出，不强制将仍在清理的任务标为已结束。支持取消、列表恢复和组件重新挂载后继续查询。终态任务最多保留 1 小时、最多 40 条；Host 重启不会持久恢复旧任务。取消或超时先显示正在停止，待清理退出后才进入终态并释放运行位置。插件卸载会请求停止并等待任务及工具调用清理。
-
-macOS 打开本地文件会等待 `open` 的退出状态；失败会显示错误，不再将进程启动视为打开成功。
-
-## 安装
-
-复制到 `$DSH_HOME/plugins/huoqu`，在 `$DSH_HOME/profiles/desktop/cordis.patch.yml` 写入：
+将下项合并到 `$DSH_HOME/profiles/desktop/cordis.patch.yml`，保留原有配置：
 
 ```yaml
 - insert:
@@ -82,27 +50,74 @@ macOS 打开本地文件会等待 `open` 的退出状态；失败会显示错误
       name: ../../plugins/huoqu/lib/index.js
 ```
 
-完全退出 DeepSeek Harness（macOS：⌘Q）再打开并建立新会话，侧栏会出现「网页获取」。Host 修改和新工具 schema 需要重启/新会话才能加载；仅保存源码并不会更新正在运行的 Host。以当前会话的侧栏 GET `version: "0.2.2"`、新工具 purpose/backend/browser_identity schema 及 capture 结果 `pluginVersion: "0.2.2"` 核对实际加载版本，不能以源码单测代替已部署验收。
+**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。普通登录态采集还需安装配套 Chrome 插件及扩展。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为0.2.2，不能用磁盘版本冒充已加载。
 
-## 0.1.1 修复
+以下为匿名网页回归参数示例；输出路径须是全新目录或可核对归属的既有副本：
 
-保留重定向资源的原始地址映射；补齐 CSS `image-set()`、独立 SVG 及 SVG 属性的资源发现和离线改写。额外下载最多尝试 1200 个资源，读取字节共享 1000 MiB 预算，失败响应也占用预算，耗尽后停止新请求。普通资源单个不超过 200 MiB；页面里的视频和音频单个不超过 640 MiB，仍受总预算限制。最终 MHTML 不超过 1000 MiB。源站返回 404 或 410 的引用会从静态副本里去掉，不再因此把整次采集判失败。修复 IPv4 映射 IPv6 的私网识别，以及普通正文包含 “Just a moment” 时被误判为验证页的问题。静态化、权限、任务生命周期及清理修复见上述说明。
-
-补修覆盖外部 SVG paint 的依赖、ID 冲突与样式隔离；侧栏任务列表乱序、文件夹选择及打开操作的迟到响应不覆盖新任务状态。移除来源、MHTML 和离线预览的绝对 1000 字符下限，有意义的短页面不再被误拒绝或误报 `partial`；仍验证原始 HTML 非空、MHTML MIME 结构及大小上限，保留正文不足、验证/拒绝页与丢图检查。正式 Chrome 扩展及快照失败时的 DOM 回退保留真实 `DOCTYPE`，包括分块读取，避免丢失文档模式造成布局偏移；不会给原本没有 `DOCTYPE` 的页面强加声明。
-
-## 开发与验证
-
-当前 Host/桥接测试依赖同级 `chrome/` 中的配套插件。这是开发测试依赖；运行时无配套插件，仅显式 anonymous/prefer-current 场景允许使用固定隔离 shell，默认 current 场景拒绝改变身份。共享验证逻辑来自 `vendor/browser-execution/` 中同一官方 source-provenance artifact，完整五包闭包为相对 file 依赖，锁定于 npm lock；插件只保留 tiny wrapper + 静态 pin JSON，不复制通用 resolver 或从绝对源码 checkout 运行。更新共享产物必须重建真实依赖 lock，并核对三个消费者 artifact SHA 一致。当前实际安装为 private off-cycle `0.2.1-alpha.2.browser-policy.1`，tarball SHA-256 `efae81d6fab57b12aa5c3a4663f42e379344b5a0a9b61b302a8ee55b3ae80b14`，官方源码 provenance SHA-256 `60bf07c6a6f8d5385aee45cb541128127e4645a3061532a93e6f1c47f88cc369`；不是官方 full release，也未修改已安装 ASAR。metadata 的 `policyPackage` 读取标准 package export 中真实 installed version/localArtifactVersion/sourceSha256，不能以 filename 或缓存常量自证。
-
-```bash
-for file in lib/*.js; do /usr/local/bin/node --check "$file" || exit; done
-/usr/local/bin/node --test test/*.test.mjs
-# 可选：全部回归，包含真实隔离 Chrome 安全与 SVG 像素测试，不访问用户正式 Chrome
-HUOQU_BROWSER_TESTS=1 /usr/local/bin/node --test test/*.test.mjs
-# 可选：对只读官方包运行真实 SessionStore / sandboxPolicy / FS 契约测试
-DSH_OFFICIAL_ROOT=/path/to/official/dsh HUOQU_BROWSER_TESTS=1 /usr/local/bin/node --test test/*.test.mjs
+```json
+{"url":"https://example.com/","purpose":"web-regression","browser_identity":"anonymous","backend":"headless","output_dir":"/tmp/new-capture"}
 ```
 
-会话回归覆盖所有 HTTP 操作缺失/空白/畸形 ID 拒绝、历史/未加载对象拒绝、跨会话列表/状态/取消/打开隔离、排队后卸载与收紧策略、取消时的清理权限、切换会话的迟到响应。可选官方集成直接使用 Cordis Context、SessionStore、SessionProjectionRegistry、SandboxPolicyService 与 LocalFileSystem：官方 `SessionStore.get(id)` 只返回 live 对象，`prepare()` 的 detached 会话不可执行，`resolve({ session })` 从投影事件读取实时 mode 和 session 工作区；本插件不调用默认 `resolve({})`，也不制造会话对象。
+## 用途与身份
 
-常规测试覆盖权限、任务取消/卸载/恢复、过期取消响应不覆盖新任务选择、参数规范化、资源限制、IPv6 私有地址、别名重定向、静态化、输出事务、Chrome 启动失败及清理失败；新增完整采集路径的短正文、小 MHTML、畸形/空归档拒绝，以及短路径/分块读取的 HTML5、传统和缺省 DOCTYPE。真实浏览器回归使用无害合成页面，检查自动业务按钮未触发、正常 MHTML 与快照失败的 HTML 回退均不执行本地文件读取脚本；嵌套 data 样式表在线生效、离线被 CSP 阻止且如实返回 `partial`。真实 SVG 和短页面分别覆盖正常快照与 DOM 回退：安全页面 `completed`、源站/HTML/MHTML 截图字节相同，带样式 SVG 仍为 `partial` 且不污染宿主；短页面同时验证标准模式和无 DOCTYPE 的 quirks 模式。
+| 项目 | 默认与要求 |
+| --- | --- |
+| `purpose=capture` | `current` 身份，优先当前正式 Chrome；扩展不可用明确失败 |
+| `purpose=automation/web-regression` | `anonymous` + owned true headless，不借用用户 Chrome |
+| `backend` | `auto`、`current-chrome`、`headless`；auto 依用途/身份，不依据任意异常猜测 |
+| `browser_identity=prefer-current` | 显式允许仅在真正扩展不可用/可选模块缺失时匿名降级，并报告原因 |
+| 不合法组合 | headless+current、current-chrome+anonymous、automation+current 均拒绝 |
+| 输出目录 | 默认 `~/Downloads/huoqu/`；workspace-write 改用工作区或平台临时目录 |
+
+协议、旧扩展、权限、引擎版本及身份错误不允许降级。viewport只调整本任务 target，不移动用户原生窗口；MHTML/资源不携带登录凭据，无法匿名获取的私有素材如实报告。
+
+<details>
+<summary><strong>固定浏览器安装、版本与校验</strong></summary>
+
+固定 `playwright-core@1.58.2`、Chromium headless shell revision1208、真实版本145.0.7632.6；不扫描其他项目或选缓存最高版本，不回退 Chrome.app/Chromium.app。校验发布 manifest、完成 marker、安装锁、原生 arm64 Mach-O、全部17个安装文件 SHA-256和实际 `--version`，不是看文件名或可执行位。
+
+默认 Playwright 缓存是 `~/Library/Caches/ms-playwright`。`PLAYWRIGHT_BROWSERS_PATH=0` 为插件包内安装；指定相对路径按 execution cwd。安装与启动 Host/测试必须采用同一缓存语义；同名变量优先于 npm config，即使为空也占优先级。相对路径刻意忽略 INIT_CWD。`HUOQU_CHROME_PATH` 只允许完整相同固定安装；空值、伪装二进制、GUI symlink、其他版本拒绝。
+
+[浏览器测量清单](lib/headless-browser.lock.json)记录官方 CLI 下载字节的本地测量 SHA，不是上游签名。更新/扩平台需同步依赖、lock和真实 OS/架构验收。共享执行策略来自随仓库 vendored 的 `0.2.1-alpha.2.browser-policy.1` 私有 off-cycle artifact，不是官方 full release，不改已安装 ASAR。
+
+</details>
+
+## 产物与边界
+
+| 文件 | 内容 |
+| --- | --- |
+| `index.html` / `assets/` | 本地入口及资源 |
+| `index.mhtml` | 单文件静态副本 |
+| `source.png` / `local.png` | 源站与本地预览截图 |
+| `report.json` / `manifest.json` | 验证结果、失败原因与归属清单 |
+
+- 去除脚本、事件、嵌入页及主动跳转，添加 CSP；离线浏览器禁 JS、不开放跨本地文件读取特权。滚动以加载懒内容，但不自动点击业务按钮/轮播/fullpage API，未渲染或需点击的内容可缺失。
+- 普通 SVG paint 可内联；含主动内容、重复ID或样式表的 SVG 不晋升宿主DOM。无法本地化按失败/partial记录，不通过删除样式伪造完整还原。保留真实 DOCTYPE，短页面不因旧1000字符门槛误拒绝。
+- 输出目录必须为空或由 manifest/report及资源证明属于既有 huoqu副本；不因名字像 index.html/assets 就覆盖。替换失败恢复旧内容，恢复失败保留备份并报告。
+- 只有资源完整、离线HTML/MHTML预览及内容/图片检查通过、浏览器清理成功，才是 `completed`；否则 `partial` 或明确失败。清理失败阻止新发布和旧副本替换，并报告残留profile。
+- 额外资源最多1200次，读取共1000MiB（失败响应也计入）；普通资源单个200MiB，音视频640MiB，最终MHTML1000MiB。404/410引用可移除而不因此判整次失败。
+
+<details>
+<summary><strong>权限、后台任务及取消</strong></summary>
+
+工具和全部侧栏HTTP操作要求真实有效且已加载的 sessionId；不主动加载历史、不接受 agentless 或请求伪造 scope/cwd/提权。缺失/畸形400，历史或未加载403，服务不可用503。跨会话资源返回404，不泄露URL或路径。权限在排队与每次写入、回滚、清理前重查，缺服务/未知策略拒绝；read-only不能采集，但可查看/打开自己既有结果并请求停止。
+
+侧栏串行，最多4个运行/排队任务；排队开始240秒后请求停止，等实际清理退出才释放位置。终态最多保留1小时/40条，Host重启不恢复任务。会话切换丢弃迟到响应，卸载会等待清理。权限收紧阻止清理时报告残留位置，不越权删除。macOS open 等待退出结果才确认打开成功。
+
+</details>
+
+## 验证
+
+```sh
+cd "$DSH_HOME/plugins/huoqu"
+for file in lib/*.js; do node --check "$file" || exit 1; done
+node --test test/*.test.mjs
+```
+
+Host/桥接回归依赖同级 Chrome 插件。可选 `HUOQU_BROWSER_TESTS=1` 使用固定隔离shell；`DSH_OFFICIAL_ROOT` 可指向只读官方包验证真实SessionStore/权限契约。fixtures不接用户正式Chrome；模拟、合成页面与源码测试不能替代已部署采集验收。**本轮仅检查文档、链接、图示和排版，未重跑产品测试或重启桌面。**
+
+## 许可
+
+[MIT License](LICENSE)。这是静态渲染状态采集器，不是原站完整备份、交互回放或登录凭据迁移工具。
+
+<div align="center"><sub>保存有范围，完成有证据。 · <a href="README.en.md">Read in English →</a></sub></div>
