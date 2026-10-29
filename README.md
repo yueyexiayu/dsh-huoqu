@@ -4,7 +4,7 @@
 <p><strong>保存当前渲染状态，而不是假装复制整个网站。</strong></p>
 <p>DeepSeek Harness 的静态 HTML / MHTML 采集与离线核验插件。</p>
 <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
-<p><a href="package.json">v0.2.2</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="package.json">v0.2.3</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
 <p><a href="#核心能力">核心能力</a> · <a href="#工作方式">工作方式</a> · <a href="#快速开始">快速开始</a> · <a href="#用途与身份">用途与身份</a> · <a href="#产物与边界">产物与边界</a> · <a href="#验证">验证</a></p>
 </div>
 
@@ -42,15 +42,14 @@ npm ci --ignore-scripts
 npm run install:headless
 ```
 
-将下项合并到 `$DSH_HOME/profiles/desktop/cordis.patch.yml`，保留原有配置：
+作为 **desktop profile bundle** 加载。在 `$DSH_HOME/profiles/desktop/package.json` 两处都加上 `huoqu`：
 
-```yaml
-- insert:
-    - id: huoqu
-      name: ../../plugins/huoqu/lib/index.js
-```
+- `dependencies`：`link:$DSH_HOME/plugins/huoqu`
+- `dsh.profile.bundles`：字符串 id `huoqu`
 
-**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。普通登录态采集还需安装配套 Chrome 插件及扩展。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为0.2.2，不能用磁盘版本冒充已加载。
+在该 profile 目录安装依赖，使 `node_modules/huoqu` 解析到本插件。**禁止**再在 desktop `cordis.patch.yml` 里 `- insert:` 同一 id；同一 id 既 bundle 又 insert 会变成两个实例。
+
+**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。普通登录态采集还需安装配套 Chrome 插件及扩展。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为0.2.3，不能用磁盘版本冒充已加载。
 
 以下为匿名网页回归参数示例；输出路径须是全新目录或可核对归属的既有副本：
 
@@ -78,7 +77,7 @@ npm run install:headless
 
 默认 Playwright 缓存是 `~/Library/Caches/ms-playwright`。`PLAYWRIGHT_BROWSERS_PATH=0` 为插件包内安装；指定相对路径按 execution cwd。安装与启动 Host/测试必须采用同一缓存语义；同名变量优先于 npm config，即使为空也占优先级。相对路径刻意忽略 INIT_CWD。`HUOQU_CHROME_PATH` 只允许完整相同固定安装；空值、伪装二进制、GUI symlink、其他版本拒绝。
 
-[浏览器测量清单](lib/headless-browser.lock.json)记录官方 CLI 下载字节的本地测量 SHA，不是上游签名。更新/扩平台需同步依赖、lock和真实 OS/架构验收。共享执行策略来自随仓库 vendored 的 `0.2.1-alpha.2.browser-policy.1` 私有 off-cycle artifact，不是官方 full release，不改已安装 ASAR。
+[浏览器测量清单](lib/headless-browser.lock.json)记录官方 CLI 下载字节的本地测量 SHA，不是上游签名。更新/扩平台需同步依赖、lock和真实 OS/架构验收。共享执行策略来自随仓库 vendored 的 `0.2.1-alpha.4.browser-policy.1` 私有 off-cycle artifact，不是官方 full release，不改已安装 ASAR。
 
 </details>
 
@@ -114,7 +113,7 @@ for file in lib/*.js; do node --check "$file" || exit 1; done
 node --test test/*.test.mjs
 ```
 
-Host/桥接回归依赖同级 Chrome 插件。可选 `HUOQU_BROWSER_TESTS=1` 使用固定隔离shell；`DSH_OFFICIAL_ROOT` 可指向只读官方包验证真实SessionStore/权限契约。fixtures不接用户正式Chrome；模拟、合成页面与源码测试不能替代已部署采集验收。**本轮仅检查文档、链接、图示和排版，未重跑产品测试或重启桌面。**
+Host/桥接回归依赖同级 Chrome 插件。可选 `HUOQU_BROWSER_TESTS=1` 使用固定隔离shell；`DSH_OFFICIAL_ROOT` 可指向只读官方包验证真实SessionStore/权限契约。fixtures不接用户正式Chrome；模拟、合成页面与源码测试不能替代已部署采集验收。Host/Client 改动需 ⌘Q 重开后用新会话核对侧栏。
 
 ## 许可
 

@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { API_PATH, apply, inject, name } from "../lib/index.js";
-import { pluginPackage } from "./package-fixture.mjs";
+import { BROWSER_POLICY_PACKAGE } from "../lib/execution.js";
+import { pluginPackage, browserPolicyPackage } from "./package-fixture.mjs";
 
 test("host entry registers huoqu tool and the declared route", async () => {
   let tool;
@@ -49,4 +51,16 @@ test("host entry registers huoqu tool and the declared route", async () => {
   assert.equal((await list.json()).version, pluginPackage.version);
   assert.doesNotMatch(tool.description, /retaining scripts/);
   assert.match(rendered[0].text, /图片未加载/);
+});
+
+test("installed browser-policy package matches provenance metadata, not the tarball filename", async () => {
+  const provenance = JSON.parse(await readFile(new URL("../vendor/browser-execution/provenance.json", import.meta.url), "utf8"));
+  assert.equal(pluginPackage.version, "0.2.3");
+  assert.equal(browserPolicyPackage.version, provenance.version);
+  assert.equal(browserPolicyPackage.dshLocalArtifactVersion, provenance.version);
+  assert.equal(browserPolicyPackage.dshSourceArtifact?.sourceSha256, provenance.sourceSha256);
+  assert.equal(BROWSER_POLICY_PACKAGE.version, provenance.version);
+  assert.equal(BROWSER_POLICY_PACKAGE.localArtifactVersion, provenance.version);
+  assert.equal(BROWSER_POLICY_PACKAGE.sourceSha256, provenance.sourceSha256);
+  assert.notEqual(provenance.version, "0.2.1-alpha.2.browser-policy.1");
 });

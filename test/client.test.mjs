@@ -309,6 +309,55 @@ test("sidebar folder button calls the native folder picker API action", async ()
   }
 });
 
+test("sidebar copy does not claim silent headless when the extension is missing", async () => {
+  const client = mountClient(await readFile(clientPath, "utf8"), async () => response({ ok: true, jobs: [] }));
+  try {
+    client.render({ sessionId: "fixture" });
+    await client.drain();
+    const tree = client.render({ sessionId: "fixture" });
+    assert.doesNotMatch(text(tree), /扩展未连接时才使用无头|才使用无头 Chrome/);
+    assert.match(text(tree), /不会悄悄改用匿名无头/);
+  } finally { client.unmount(); }
+});
+
+test("README installs as a desktop profile bundle and forbids insert of the same id", async () => {
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /desktop profile bundle/);
+  assert.match(readme, /dsh\.profile\.bundles/);
+  assert.doesNotMatch(readme, /name:\s*\.\.\/\.\.\/plugins\/huoqu\/lib\/index\.js/);
+  assert.match(readme, /禁止[\s\S]*insert/);
+});
+
+test("useTabInfo tab.sessionId enables capture when props.sessionId is absent", async () => {
+  const bodies = [];
+  const client = mountClient(await readFile(clientPath, "utf8"), async (url, options) => {
+    const body = options?.body ? JSON.parse(options.body) : null;
+    if (body) bodies.push(body);
+    if (body?.action === "capture") return response({ ok: true, jobId: "job-tab", status: "queued", outputDir: "/tmp/out" });
+    if (String(url).includes("jobId=")) {
+      return response({ ok: true, jobId: "job-tab", status: "completed", url: "https://example.test/page", outputDir: "/tmp/out",
+        result: { ok: true, title: "done", indexHtml: "/tmp/out/index.html", warnings: [] } });
+    }
+    return response({ ok: true, jobs: [] });
+  });
+  const props = { useTabInfo() { return { tab: { sessionId: "from-tab" } }; } };
+  try {
+    client.render(props);
+    await client.drain();
+    let tree = client.render(props);
+    assert.doesNotMatch(text(tree), /未关联当前会话/);
+    assert.equal(button(tree, "选择文件夹").props.disabled, false);
+    const urlInput = walk(tree, (node) => node.type === "input" && node.props.type === "url")[0];
+    assert.ok(urlInput, "url field missing");
+    urlInput.props.onChange({ target: { value: "https://example.test/page" } });
+    tree = client.render(props);
+    await walk(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+    await client.drain();
+    const capture = bodies.find((body) => body.action === "capture");
+    assert.equal(capture?.sessionId, "from-tab");
+  } finally { client.unmount(); }
+});
+
 test("missing session disables capture and picker, and never requests Host default jobs", async () => {
   const requests = [];
   const client = mountClient(await readFile(clientPath, "utf8"), async (...args) => { requests.push(args); return response({ ok: true, jobs: [] }); });

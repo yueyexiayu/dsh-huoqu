@@ -1,0 +1,32 @@
+{
+  "kind": "private-local-browser-policy-build",
+  "version": "0.2.1-alpha.4.browser-policy.1",
+  "baseWorkspaceVersion": "0.2.1-alpha.4",
+  "baseCommit": "b879ccdbb11be87cd7c29bd86cc59c4b7a846425",
+  "sourceSha256": "1a0d4cb9021826ef0cbba2f63a0fd07d4f295fd01418f5e61754c9b897a362a8",
+  "sourceSha256Formula": "sha256 of canonical JSON {baseCommit, sourceFiles[{path,sha256,role}]} (sorted keys, two-space indent, trailing newline)",
+  "source": "Official DSH browser-use workspace sources; generated artifacts, not a copied policy implementation",
+  "publication": "Not an official family release; the browser policy package is private",
+  "files": [
+    {
+      "name": "deepseek-ai-dsh-browser-use-0.2.1-alpha.4.browser-policy.1.tgz",
+      "sha256": "11796ed85ad7e9025b42d93bf5449ea655618e3b2d82a3ed177d2a98c1cba345"
+    },
+    {
+      "name": "deepseek-ai-dsh-brand-0.2.1-alpha.2.tgz",
+      "sha256": "0672232f434cc542497ff819f44262a53ad291ee85a4813585331a0f26c573fe"
+    },
+    {
+      "name": "deepseek-ai-cordis-4.0.5-alpha.1.tgz",
+      "sha256": "739a0640789666df3e160ed79e287bec667b8d6e2700b71c8032c4e91f5ff12c"
+    },
+    {
+      "name": "deepseek-ai-cosmokit-1.8.6-alpha.1.tgz",
+      "sha256": "a1e6a996ee6ef426828d349bed80342c8c6d56b9da3de89dac316c5d09d2d150"
+    },
+    {
+      "name": "standard-schema-spec-1.1.0.tgz",
+      "sha256": "8a46bacdb918a11ab93fc050a61ff2fe1157448f9fe90e4afe17bce4fd1276d5"
+    }
+  ]
+}

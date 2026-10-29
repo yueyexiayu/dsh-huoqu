@@ -257,7 +257,7 @@ test("borrowed source preserves viewport/UA while offline controls belong only t
   });
 });
 
-function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", summary: summaryOverrides = {}, responses = [], fileResponses = [] } = {}) {
+function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", snapshotError, summary: summaryOverrides = {}, responses = [], fileResponses = [] } = {}) {
   const state = { closes: 0, navigations: 0, stopped: 0, methods: [] };
   const listeners = new Set();
   const browser = {
@@ -279,7 +279,10 @@ function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fi
           const events = String(params?.url || "").startsWith("file:") ? [...responses, ...fileResponses] : responses;
           for (const event of events) for (const listener of listeners) listener({ sessionId: "fixture", ...event });
         }
-        if (method === "Page.captureSnapshot") return { data: snapshot };
+        if (method === "Page.captureSnapshot") {
+          if (snapshotError) throw new Error(snapshotError);
+          return { data: snapshot };
+        }
         if (method === "Page.captureScreenshot") return { data: Buffer.from("fixture image").toString("base64") };
         if (method === "Runtime.evaluate") {
           const summary = { url: "https://example.test/", title: "Fixture", viewport: { width: 1440, height: 1000 },
@@ -323,6 +326,41 @@ for (const mode of ["extension", "headless"]) {
     });
   });
 }
+
+test("extension capture archives Page.captureSnapshot instead of empty live HTML", async () => {
+  await temporaryDirectory(async (dir) => {
+    const html = "<html><body>HTML_ONLY_MARKER " + "live document text. ".repeat(40) + "</body></html>";
+    const snapshot = smallSnapshot("<html><body>SNAPSHOT_MARKER " + "archived snapshot text. ".repeat(40) + "</body></html>");
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser({ mode: "extension", html, snapshot });
+    mod.useBrowser(browser);
+    const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir });
+    assert.equal(result.status, "completed");
+    const saved = await fs.readFile(path.join(dir, "index.html"), "utf8");
+    assert.match(saved, /SNAPSHOT_MARKER/);
+    assert.doesNotMatch(saved, /HTML_ONLY_MARKER/);
+    assert.equal(state.methods.some((call) => call.method === "Page.captureSnapshot"), true);
+  });
+});
+
+test("extension snapshot failure falls back to HTML with a warning instead of a fake empty success", async () => {
+  await temporaryDirectory(async (dir) => {
+    const html = "<html><body>FALLBACK_HTML_MARKER " + "meaningful fallback text. ".repeat(40) + "</body></html>";
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser({
+      mode: "extension",
+      html,
+      snapshotError: "Synthetic extension snapshot failure",
+    });
+    mod.useBrowser(browser);
+    const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir });
+    assert.notEqual(result.status, "failed");
+    assert.match(result.warnings.join("\n"), /Synthetic extension snapshot failure/);
+    assert.match(await fs.readFile(path.join(dir, "index.html"), "utf8"), /FALLBACK_HTML_MARKER/);
+    assert.ok(result.indexHtml);
+    assert.equal(state.methods.some((call) => call.method === "Page.captureSnapshot"), true);
+  });
+});
 
 for (const [label, options, error] of [
   ["blank source", { html: "<html><body></body></html>" }, /未加载出可用内容/],

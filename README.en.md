@@ -4,7 +4,7 @@
 <p><strong>Save the rendered state—not a fictional copy of an entire website.</strong></p>
 <p>Static HTML/MHTML capture and offline verification for DeepSeek Harness.</p>
 <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
-<p><a href="package.json">v0.2.2</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="package.json">v0.2.3</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
 <p><a href="#features">Features</a> · <a href="#how-it-works">How it works</a> · <a href="#quick-start">Quick start</a> · <a href="#purpose-and-identity">Purpose and identity</a> · <a href="#outputs-and-boundaries">Outputs and boundaries</a> · <a href="#validation">Validation</a></p>
 </div>
 
@@ -42,15 +42,14 @@ npm ci --ignore-scripts
 npm run install:headless
 ```
 
-Merge into `$DSH_HOME/profiles/desktop/cordis.patch.yml`, preserving existing entries:
+Load it as a **desktop profile bundle**. Add `huoqu` in both places in `$DSH_HOME/profiles/desktop/package.json`:
 
-```yaml
-- insert:
-    - id: huoqu
-      name: ../../plugins/huoqu/lib/index.js
-```
+- `dependencies`: `link:$DSH_HOME/plugins/huoqu`
+- `dsh.profile.bundles`: the string id `huoqu`
 
-**Quit DSH fully with ⌘Q, reopen it and start a new session.** The sidebar shows webpage capture. Signed-in capture also needs the paired Chrome plugin/extension. Verify actual sidebar GET `version`, new tool schema and result `pluginVersion` as 0.2.2; disk declarations are not loaded-runtime proof.
+Install the profile so `node_modules/huoqu` resolves to this plugin. **Do not** also `- insert:` the same id in desktop `cordis.patch.yml`; bundling and inserting the same id creates two instances.
+
+**Quit DSH fully with ⌘Q, reopen it and start a new session.** The sidebar shows webpage capture. Signed-in capture also needs the paired Chrome plugin/extension. Verify actual sidebar GET `version`, new tool schema and result `pluginVersion` as 0.2.3; disk declarations are not loaded-runtime proof.
 
 Example anonymous web-regression parameters; the output must be new or a verifiably owned previous capture:
 
@@ -78,7 +77,7 @@ Pins `playwright-core@1.58.2`, Chromium headless shell revision 1208 and actual 
 
 Default cache: `~/Library/Caches/ms-playwright`. `PLAYWRIGHT_BROWSERS_PATH=0` installs inside the plugin package; relative paths resolve from execution cwd. Installation and Host/test startup must use the same semantics. The direct variable precedes npm configuration even when empty; relative paths deliberately ignore INIT_CWD. `HUOQU_CHROME_PATH` accepts only another complete identical installation; empty values, renamed binaries, GUI symlinks and other versions fail.
 
-The [browser measurement manifest](lib/headless-browser.lock.json) contains locally measured official-CLI download hashes, not upstream signatures. Updates/platform additions require matching dependency/lock changes and actual OS/architecture validation. Shared execution policy comes from the vendored private off-cycle `0.2.1-alpha.2.browser-policy.1` artifact, not an official full release or installed-ASAR modification.
+The [browser measurement manifest](lib/headless-browser.lock.json) contains locally measured official-CLI download hashes, not upstream signatures. Updates/platform additions require matching dependency/lock changes and actual OS/architecture validation. Shared execution policy comes from the vendored private off-cycle `0.2.1-alpha.4.browser-policy.1` artifact, not an official full release or installed-ASAR modification.
 
 </details>
 
@@ -114,7 +113,7 @@ for file in lib/*.js; do node --check "$file" || exit 1; done
 node --test test/*.test.mjs
 ```
 
-Host/bridge regression needs the sibling Chrome plugin. Optional `HUOQU_BROWSER_TESTS=1` uses the pinned isolated shell; `DSH_OFFICIAL_ROOT` can target a read-only official package for real SessionStore/policy contracts. Fixtures do not connect to the user's Chrome. Synthetic/source tests do not replace deployed-capture acceptance. **This update checks documentation, links, diagrams and layout only; product tests were not rerun and the desktop was not restarted.**
+Host/bridge regression needs the sibling Chrome plugin. Optional `HUOQU_BROWSER_TESTS=1` uses the pinned isolated shell; `DSH_OFFICIAL_ROOT` can target a read-only official package for real SessionStore/policy contracts. Fixtures do not connect to the user's Chrome. Synthetic/source tests do not replace deployed-capture acceptance. Host/Client changes need a full ⌘Q restart and a new session before the sidebar can be accepted.
 
 ## License
 
