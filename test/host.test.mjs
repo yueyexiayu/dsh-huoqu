@@ -55,7 +55,7 @@ test("host entry registers huoqu tool and the declared route", async () => {
 
 test("installed browser-policy package matches provenance metadata, not the tarball filename", async () => {
   const provenance = JSON.parse(await readFile(new URL("../vendor/browser-execution/provenance.json", import.meta.url), "utf8"));
-  assert.equal(pluginPackage.version, "0.2.3");
+  assert.equal(pluginPackage.version, "0.2.4");
   assert.equal(browserPolicyPackage.version, provenance.version);
   assert.equal(browserPolicyPackage.dshLocalArtifactVersion, provenance.version);
   assert.equal(browserPolicyPackage.dshSourceArtifact?.sourceSha256, provenance.sourceSha256);
