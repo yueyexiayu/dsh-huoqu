@@ -45,6 +45,14 @@ test("identity and backend combinations fail explicitly rather than change ident
   assert.deepEqual(normalizeCaptureOptions(options), options);
 });
 
+test("embedded identity is explicit and cannot silently downgrade", () => {
+  const options = normalizeCaptureOptions({ url: "https://example.test/", backend: "dsh-embedded" });
+  assert.equal(options.browserIdentity, "dsh-embedded");
+  assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", backend: "dsh-embedded", browser_identity: "anonymous" }), /identity/);
+  assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", backend: "current-chrome", browser_identity: "dsh-embedded" }), /identity/);
+  assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", backend: "dsh-embedded", purpose: "web-regression" }), /headless|anonymous/);
+});
+
 test("capture rejects unsupported purposes and execution owner injection", () => {
   for (const input of [{ purpose: "desktop-regression" }, { backend: "chrome.app" }, { browser_identity: "stolen" }, { scope: { sessionId: "other" } }, { execution: {} }, { cwd: "/other" }, { ownership: "owned-process" }]) {
     assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", ...input }), /purpose|backend|identity|owner|scope|execution|cwd/);

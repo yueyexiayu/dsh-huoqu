@@ -306,6 +306,71 @@ function smallSnapshot(body, type = "text/html") {
   return `Content-Type: multipart/related; boundary="fixture"\r\n\r\n--fixture\r\nContent-Type: ${type}\r\nContent-Location: https://example.test/\r\n\r\n${body}\r\n--fixture--\r\n`;
 }
 
+test("embedded capture uses owned chunks and separate anonymous verifier; closes before success", async () => {
+  await temporaryDirectory(async dir => {
+    const mod = await captureHarness();
+    const image = path.join(dir, "photo.png");
+    await fs.writeFile(image, "png");
+    const { browser, state } = fixtureBrowser({ fileResponses: failedFileEvents(pathToFileURL(image).href, "net::ERR_INTERNET_DISCONNECTED") });
+    mod.useBrowser(browser);
+    const html = "<html><body>Embedded fixture contains enough readable content for a capture.</body></html>";
+    const files = { mhtml: Buffer.from(smallSnapshot(html)), screenshot: Buffer.from("fixture image") };
+    const calls = [];
+    const desktopBrowser = { async execute(request) {
+      calls.push(request);
+      if (request.action === "capture_start") return { captureId: "capture-1", sourcePage: { url: "https://example.test/", title: "Fixture",
+        viewport: { width: 1440, height: 1000 }, document: { width: 1440, height: 1000, htmlBytes: html.length, textLength: 60 }, images: [], stylesheets: [], scripts: 0 },
+        networkEvidence: [], networkFailures: [], warnings: [], scrollResult: { scrollHeight: 1000, scrollSteps: 1 },
+        engine: { browserVersion: "145.0.7632.6" }, mhtmlBytes: files.mhtml.length, screenshotBytes: files.screenshot.length };
+      if (request.action === "capture_read") return { data: files[request.artifact].subarray(request.offset, request.offset + request.length).toString("base64") };
+      if (request.action === "capture_close") return { closed: true };
+      throw new Error("unexpected embedded request");
+    } };
+    const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "embedded-task" }, desktopBrowser };
+    const outputDir = path.join(dir, "out");
+    const result = await mod.capturePage({ url: "https://example.test/", output_dir: outputDir, backend: "dsh-embedded" }, undefined, undefined, operation);
+    assert.equal(result.status, "completed");
+    assert.equal(result.browserExecution.actualIdentity, "dsh-embedded");
+    assert.equal(result.browserExecution.mode, "hidden-window");
+    assert.equal(result.browserExecution.ownership, "operation-owned-window");
+    assert.equal(result.verificationBrowserExecution.actualIdentity, "anonymous");
+    assert.equal(result.offlineNetworkFailures, 0, "saved images rejected solely by offline emulation do not fail validation");
+    assert.equal(state.navigations, 0);
+    assert.equal(state.verifier.navigations, 2);
+    assert.equal(calls.at(-1).action, "capture_close");
+    assert.ok(calls.every(call => call.sessionId === "embedded-session"));
+    assert.match(await fs.readFile(path.join(outputDir, "index.html"), "utf8"), /Embedded fixture/);
+  });
+});
+
+test("embedded capture fails without its Desktop service and cleans its stage", async () => {
+  await temporaryDirectory(async dir => {
+    const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "no-service" } };
+    await assert.rejects(capturePage({ url: "https://example.test/", output_dir: dir, backend: "dsh-embedded" }, undefined, undefined, operation), /内置浏览器采集服务不可用/);
+    assert.deepEqual(await fs.readdir(dir), []);
+  });
+});
+
+test("embedded incomplete chunk fails and closes the capture", async () => {
+  await temporaryDirectory(async dir => {
+    const calls = [];
+    const desktopBrowser = { async execute(request) {
+      calls.push(request.action);
+      if (request.action === "capture_start") return { captureId: "capture-1", sourcePage: { url: "https://example.test/", title: "Fixture",
+        viewport: { width: 800, height: 600 }, document: { width: 800, height: 600, htmlBytes: 50, textLength: 30 }, images: [], stylesheets: [], scripts: 0 },
+        networkEvidence: [], networkFailures: [], warnings: [], scrollResult: { scrollHeight: 600, scrollSteps: 1 },
+        engine: { browserVersion: "145.0.7632.6" }, mhtmlBytes: 128, screenshotBytes: 8 };
+      if (request.action === "capture_read") return { data: Buffer.from("short").toString("base64") };
+      if (request.action === "capture_close") return { closed: true };
+      throw new Error("unexpected request");
+    } };
+    const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "bad-chunk" }, desktopBrowser };
+    await assert.rejects(capturePage({ url: "https://example.test/", output_dir: dir, backend: "dsh-embedded" }, undefined, undefined, operation), /Incomplete embedded capture chunk/);
+    assert.deepEqual(calls, ["capture_start", "capture_read", "capture_close"]);
+    assert.deepEqual(await fs.readdir(dir), []);
+  });
+});
+
 for (const mode of ["extension", "headless"]) {
   test(`meaningful short HTML and small MHTML complete through ${mode} capture`, async () => {
     await temporaryDirectory(async (dir) => {

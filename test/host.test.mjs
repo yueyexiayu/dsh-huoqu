@@ -18,7 +18,7 @@ test("host entry registers huoqu tool and the declared route", async () => {
     sandboxPolicy: { resolve() { return { mode: "danger-full-access", workspaceRoot: "/tmp" }; } },
   });
   assert.equal(name, "huoqu");
-  assert.deepEqual(inject, ["tools", "connection", "fs", "sandboxPolicy", "sessions"]);
+  assert.deepEqual(inject, { tools: { required: true }, connection: { required: true }, fs: { required: true }, sandboxPolicy: { required: true }, sessions: { required: true }, desktopBrowser: { required: false } });
   assert.equal(tool.name, "huoqu");
   assert.deepEqual(tool.parameters.required, ["url"]);
   assert.equal(tool.output.schema.properties.localPage.type, "object");
@@ -43,8 +43,8 @@ test("host entry registers huoqu tool and the declared route", async () => {
   assert.match(tool.description, /static offline HTML\/MHTML/);
   assert.match(tool.description, /never silent anonymous fallback/);
   assert.deepEqual(tool.parameters.properties.purpose.enum, ["capture", "automation", "web-regression"]);
-  assert.deepEqual(tool.parameters.properties.backend.enum, ["auto", "current-chrome", "headless"]);
-  assert.deepEqual(tool.parameters.properties.browser_identity.enum, ["current", "anonymous", "prefer-current"]);
+  assert.deepEqual(tool.parameters.properties.backend.enum, ["auto", "current-chrome", "headless", "dsh-embedded"]);
+  assert.deepEqual(tool.parameters.properties.browser_identity.enum, ["current", "anonymous", "prefer-current", "dsh-embedded"]);
   assert.equal(tool.output.schema.properties.browserExecution.type, "object");
   assert.equal(tool.output.schema.properties.verificationBrowserExecution.type, "object");
   const list = await route.fetch(new Request("http://dsh.local/api/huoqu?sessionId=fixture"));
@@ -55,7 +55,7 @@ test("host entry registers huoqu tool and the declared route", async () => {
 
 test("installed browser-policy package matches provenance metadata, not the tarball filename", async () => {
   const provenance = JSON.parse(await readFile(new URL("../vendor/browser-execution/provenance.json", import.meta.url), "utf8"));
-  assert.equal(pluginPackage.version, "0.2.5");
+  assert.equal(pluginPackage.version, "0.2.6");
   assert.equal(browserPolicyPackage.version, provenance.version);
   assert.equal(browserPolicyPackage.dshLocalArtifactVersion, provenance.version);
   assert.equal(browserPolicyPackage.dshSourceArtifact?.sourceSha256, provenance.sourceSha256);
