@@ -19,21 +19,33 @@ test("normalized options remain stable across the HTTP and capture boundary", ()
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", waitSeconds: 21 }), /wait_seconds/);
 });
 
-test("capture defaults preserve current Chrome identity without silent anonymous fallback", () => {
+test("capture defaults use the DSH embedded browser without silent identity fallback", () => {
   const options = normalizeCaptureOptions({ url: "https://example.test/" });
   assert.equal(options.purpose, "capture");
-  assert.equal(options.backend, "auto");
-  assert.equal(options.browserIdentity, "current");
+  assert.equal(options.backend, "dsh-embedded");
+  assert.equal(options.browserIdentity, "dsh-embedded");
 });
 
 test("automation and web regression default to isolated anonymous headless", () => {
   for (const purpose of ["automation", "web-regression"]) {
     const options = normalizeCaptureOptions({ url: "https://example.test/", purpose });
     assert.equal(options.browserIdentity, "anonymous");
-    assert.equal(options.backend, "auto");
+    assert.equal(options.backend, "headless");
     assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", purpose, browser_identity: "current" }), /headless|anonymous/);
     assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", purpose, backend: "current-chrome" }), /headless|current-chrome/);
   }
+});
+
+test("an explicit identity still decides what auto resolves to", () => {
+  const current = normalizeCaptureOptions({ url: "https://example.test/", backend: "auto", browser_identity: "current" });
+  assert.equal(current.backend, "current-chrome");
+  assert.equal(current.browserIdentity, "current");
+  const anonymous = normalizeCaptureOptions({ url: "https://example.test/", backend: "auto", browser_identity: "anonymous" });
+  assert.equal(anonymous.backend, "headless");
+  assert.equal(anonymous.browserIdentity, "anonymous");
+  const embedded = normalizeCaptureOptions({ url: "https://example.test/", backend: "auto", browser_identity: "dsh-embedded" });
+  assert.equal(embedded.backend, "dsh-embedded");
+  assert.equal(embedded.browserIdentity, "dsh-embedded");
 });
 
 test("identity and backend combinations fail explicitly rather than change identity", () => {
@@ -41,11 +53,12 @@ test("identity and backend combinations fail explicitly rather than change ident
     assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", backend, browser_identity }), /identity|anonymous|current/);
   }
   const options = normalizeCaptureOptions({ url: "https://example.test/", browser_identity: "prefer-current" });
+  assert.equal(options.backend, "current-chrome");
   assert.equal(options.browserIdentity, "prefer-current");
   assert.deepEqual(normalizeCaptureOptions(options), options);
 });
 
-test("embedded identity is explicit and cannot silently downgrade", () => {
+test("embedded identity cannot silently downgrade", () => {
   const options = normalizeCaptureOptions({ url: "https://example.test/", backend: "dsh-embedded" });
   assert.equal(options.browserIdentity, "dsh-embedded");
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test/", backend: "dsh-embedded", browser_identity: "anonymous" }), /identity/);

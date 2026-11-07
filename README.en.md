@@ -4,13 +4,13 @@
 <p><strong>Save the rendered state—not a fictional copy of an entire website.</strong></p>
 <p>Static HTML/MHTML capture and offline verification for DeepSeek Harness.</p>
 <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
-<p><a href="package.json">v0.2.8</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="package.json">v0.2.9</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
 <p><a href="#features">Features</a> · <a href="#how-it-works">How it works</a> · <a href="#quick-start">Quick start</a> · <a href="#purpose-and-identity">Purpose and identity</a> · <a href="#outputs-and-boundaries">Outputs and boundaries</a> · <a href="#validation">Validation</a></p>
 </div>
 
 ---
 
-A reference for a personal desktop workflow. The sidebar offers the DSH embedded browser's login data, Chrome, or an anonymous owned headless browser. The tool's default capture retains the current Chrome behavior. An unavailable identity fails explicitly rather than silently switching browsers.
+A reference for a personal desktop workflow. The sidebar offers the DSH embedded browser's login data, Chrome, or an anonymous owned headless browser. Both the sidebar and tool calls default to the DSH embedded browser. An unavailable identity fails explicitly rather than silently switching browsers.
 
 ## Features
 
@@ -28,9 +28,9 @@ A reference for a personal desktop workflow. The sidebar offers the DSH embedded
 
 ![A real session resolves browser identity, captures rendered state and verifies it in an isolated shell before reporting.](docs/repo-assets/workflow.en.svg)
 
-Default capture uses the [Chrome plugin](https://github.com/yueyexiayu/dsh-chrome) to create a task-owned background target, without a debug port or takeover of existing tabs. Offline restrictions apply only to the owned shell. The source page's own scripts still run during online loading.
+Default capture uses the DSH embedded browser. With `backend: "current-chrome"` it uses the [Chrome plugin](https://github.com/yueyexiayu/dsh-chrome) to create a task-owned background target, without a debug port or takeover of existing tabs. Offline restrictions apply only to the owned shell. The source page's own scripts still run during online loading.
 
-Select `backend: "dsh-embedded"` for persistent login data supplied by the DSH embedded browser. The installed DSH Host determines the sharing scope: newer Hosts supporting a global profile can share an identity across workspaces, while older Hosts may isolate it by workspace. A dedicated page is used; it does not copy the current tab's transient DOM state. Embedded source MHTML and screenshots are limited to 128 MiB each; errors do not silently switch identity. Offline verification remains in a separate anonymous shell.
+By default (no `backend`, or `backend: "dsh-embedded"`) it uses persistent login data supplied by the DSH embedded browser. The installed DSH Host determines the sharing scope: newer Hosts supporting a global profile can share an identity across workspaces, while older Hosts may isolate it by workspace. A dedicated page is used; it does not copy the current tab's transient DOM state. Embedded source MHTML and screenshots are limited to 128 MiB each; errors do not silently switch identity. Offline verification remains in a separate anonymous shell.
 
 ## Quick start
 
@@ -51,7 +51,7 @@ Load it as a **desktop profile bundle**. Add `huoqu` in both places in `$DSH_HOM
 
 Install the profile so `node_modules/huoqu` resolves to this plugin. **Do not** also `- insert:` the same id in desktop `cordis.patch.yml`; bundling and inserting the same id creates two instances.
 
-**Quit DSH fully with ⌘Q, reopen it and start a new session.** The sidebar shows webpage capture. Chrome capture needs the paired extension; embedded capture needs a Desktop BrowserHost supporting capture. Verify actual sidebar GET `version`, new tool schema and result `pluginVersion` as 0.2.8; disk declarations are not loaded-runtime proof.
+**Quit DSH fully with ⌘Q, reopen it and start a new session.** The sidebar shows webpage capture. Chrome capture needs the paired extension; embedded capture needs a Desktop BrowserHost supporting capture. Verify actual sidebar GET `version`, new tool schema and result `pluginVersion` as 0.2.9; disk declarations are not loaded-runtime proof.
 
 Example anonymous web-regression parameters; the output must be new or a verifiably owned previous capture:
 
@@ -63,9 +63,9 @@ Example anonymous web-regression parameters; the output must be new or a verifia
 
 | Item | Default and requirements |
 | --- | --- |
-| `purpose=capture` | `current` identity using the real Chrome profile; unavailable extension fails |
+| `purpose=capture` | `dsh-embedded` identity by default, using the DSH embedded browser's login data; an unavailable BrowserHost fails; the real Chrome profile is used only with an explicit `current-chrome` |
 | `purpose=automation/web-regression` | `anonymous` + owned true headless, never borrowed Chrome |
-| `backend` | `auto`, `current-chrome`, `headless`, `dsh-embedded`; auto follows purpose/identity, not arbitrary error guessing |
+| `backend` | `auto`, `current-chrome`, `headless`, `dsh-embedded`; auto follows purpose/identity: embedded by default for capture, headless for automation/web-regression |
 | `browser_identity=prefer-current` | Explicitly permits anonymous fallback only for genuine extension unavailability/absent optional module, with a reason |
 | Invalid combinations | headless+current, current-chrome+anonymous and automation+current are rejected |
 | Output | Default `~/Downloads/huoqu/`; workspace-write should use the workspace or platform temporary directory |

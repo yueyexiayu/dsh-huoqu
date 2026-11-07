@@ -62,7 +62,7 @@ apply({
   sessions: { get(id) { return sessions.get(id); } },
 });
 const post = (body, signal) => route.fetch(new Request("http://dsh.local/api/huoqu", {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: session.id, ...body }), signal,
+  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: session.id, backend: "current-chrome", ...body }), signal,
 }));
 const state = async (id, sessionId = session.id) => (await route.fetch(new Request(`http://dsh.local/api/huoqu?jobId=${id}&sessionId=${sessionId}`))).json();
 async function settled(id, sessionId = session.id) {
@@ -80,7 +80,7 @@ const start = async (suffix, extra = {}) => {
 };
 
 test("Host tool preserves ownership and resolves the calling session policy", async () => {
-  const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture" }, { agent: { session } });
+  const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture", backend: "current-chrome" }, { agent: { session } });
   assert.equal(result.title, "session-fixture");
   assert.equal(result.operation.cwd, session.header.cwd);
   assert.equal(result.operation.scope.sessionId, session.id);
@@ -196,12 +196,13 @@ test("missing optional Chrome owner allows startup/capture, other owner errors s
     // A fresh Host entry must not statically import Chrome at startup.
     const standalone = await import("../lib/index.js?owner-unavailable");
     assert.equal(standalone.name, "huoqu");
-    const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture" }, { agent: { session } });
+    // Chrome is opt-in: the explicit backend keeps this test on the optional owner path.
+    const result = await tool.execute({ url: "https://example.test/good", output_dir: "/tmp/fixture", backend: "current-chrome" }, { agent: { session } });
     assert.equal(result.ok, true);
     failure = new SyntaxError("owner fixture syntax failure");
-    await assert.rejects(tool.execute({ url: "https://example.test/good" }, { agent: { session } }), /owner fixture syntax failure/);
+    await assert.rejects(tool.execute({ url: "https://example.test/good", backend: "current-chrome" }, { agent: { session } }), /owner fixture syntax failure/);
     failure = Object.assign(new Error("transitive dependency missing"), { code: "ERR_MODULE_NOT_FOUND", url: "file:///missing-dependency.js" });
-    await assert.rejects(tool.execute({ url: "https://example.test/good" }, { agent: { session } }), /transitive dependency missing/);
+    await assert.rejects(tool.execute({ url: "https://example.test/good", backend: "current-chrome" }, { agent: { session } }), /transitive dependency missing/);
   } finally { missing.deregister(); }
 });
 

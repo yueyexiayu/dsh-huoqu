@@ -182,7 +182,7 @@ async function captureHarness() {
   const mod = await import(`data:text/javascript;base64,${Buffer.from(source + hooks).toString("base64")}#${Math.random()}`);
   const operation = { cwd: process.cwd(), scope: { sessionId: 'capture-unit', taskId: `batch-${Math.random()}` } };
   return { ...mod,
-    capturePage: (input, signal, access, context = operation) => mod.capturePage(input, signal, access, context),
+    capturePage: (input, signal, access, context = operation) => mod.capturePage({ backend: "current-chrome", ...input }, signal, access, context),
     openChrome: (options = {}) => mod.openChrome({ operation, execution: { scope: operation.scope, purpose: 'capture', mode: 'headless', ownership: 'owned-process', capabilities: ['dom', 'screenshot'] }, ...options }),
     useBrowser: browser => mod.useBrowser(browser, browser.makeVerifier()),
   };

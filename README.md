@@ -4,13 +4,13 @@
 <p><strong>保存当前渲染状态，而不是假装复制整个网站。</strong></p>
 <p>DeepSeek Harness 的静态 HTML / MHTML 采集与离线核验插件。</p>
 <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
-<p><a href="package.json">v0.2.8</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="package.json">v0.2.9</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
 <p><a href="#核心能力">核心能力</a> · <a href="#工作方式">工作方式</a> · <a href="#快速开始">快速开始</a> · <a href="#用途与身份">用途与身份</a> · <a href="#产物与边界">产物与边界</a> · <a href="#验证">验证</a></p>
 </div>
 
 ---
 
-面向个人桌面工作流的参考实现。界面可选择 DSH 内置浏览器提供的登录资料、当前 Chrome 身份或匿名无头浏览器；工具调用的默认行为仍保留当前 Chrome。身份不可用时明确失败，不悄悄切换身份。
+面向个人桌面工作流的参考实现。界面可选择 DSH 内置浏览器提供的登录资料、当前 Chrome 身份或匿名无头浏览器；工具调用与界面都默认使用 DSH 内置浏览器。身份不可用时明确失败，不悄悄切换身份。
 
 ## 核心能力
 
@@ -28,9 +28,9 @@
 
 ![真实会话先确定浏览器身份，保存渲染快照，再在隔离 shell 中核验并报告结果。](docs/repo-assets/workflow.zh-CN.svg)
 
-默认 capture 经[Chrome 插件](https://github.com/yueyexiayu/dsh-chrome)创建本任务独占的后台 target，不开调试端口、不接管现有标签。离线限制仅施加到自有 shell，不污染借用 Chrome。源站在线加载仍会执行源站自身脚本。
+默认 capture 从 DSH 内置浏览器采集；选择 `backend: "current-chrome"` 时经[Chrome 插件](https://github.com/yueyexiayu/dsh-chrome)创建本任务独占的后台 target，不开调试端口、不接管现有标签。离线限制仅施加到自有 shell，不污染借用 Chrome。源站在线加载仍会执行源站自身脚本。
 
-选择 `backend: "dsh-embedded"` 使用 DSH 内置浏览器提供的持久登录资料，在专用采集页面访问 URL；资料共享范围由当前 DSH Host 决定，支持全局共享的新版可跨工作区使用同一身份，旧版可能按工作区隔离。不会复制当前标签的 sessionStorage、SPA 内存或未保存表单。Desktop 服务不可用、身份或网络策略不能满足时明确失败，不回落 Chrome 或匿名。内置采集的源 MHTML 和截图各有 128 MiB 上限，超过时失败；Chrome 和无头后端保留原有上限。受登录保护资源的补全无法访问或网络策略受限时标记 partial；离线校验始终使用独立匿名 shell。
+默认（未指定 `backend` 或 `backend: "dsh-embedded"`）使用 DSH 内置浏览器提供的持久登录资料，在专用采集页面访问 URL；资料共享范围由当前 DSH Host 决定，支持全局共享的新版可跨工作区使用同一身份，旧版可能按工作区隔离。不会复制当前标签的 sessionStorage、SPA 内存或未保存表单。Desktop 服务不可用、身份或网络策略不能满足时明确失败，不回落 Chrome 或匿名。内置采集的源 MHTML 和截图各有 128 MiB 上限，超过时失败；Chrome 和无头后端保留原有上限。受登录保护资源的补全无法访问或网络策略受限时标记 partial；离线校验始终使用独立匿名 shell。
 
 ## 快速开始
 
@@ -51,7 +51,7 @@ npm run install:headless
 
 在该 profile 目录安装依赖，使 `node_modules/huoqu` 解析到本插件。**禁止**再在 desktop `cordis.patch.yml` 里 `- insert:` 同一 id；同一 id 既 bundle 又 insert 会变成两个实例。
 
-**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。选用当前 Chrome 身份时需要配套插件及扩展；内置身份需要支持采集的 Desktop BrowserHost。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为 0.2.8，不能用磁盘版本冒充已加载。
+**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。选用当前 Chrome 身份时需要配套插件及扩展；内置身份需要支持采集的 Desktop BrowserHost。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为 0.2.9，不能用磁盘版本冒充已加载。
 
 以下为匿名网页回归参数示例；输出路径须是全新目录或可核对归属的既有副本：
 
@@ -63,9 +63,9 @@ npm run install:headless
 
 | 项目 | 默认与要求 |
 | --- | --- |
-| `purpose=capture` | `current` 身份，优先当前正式 Chrome；扩展不可用明确失败 |
+| `purpose=capture` | 默认 `dsh-embedded` 身份，使用 DSH 内置浏览器的登录资料；BrowserHost 不可用明确失败；显式选 `current-chrome` 时才用当前 Chrome |
 | `purpose=automation/web-regression` | `anonymous` + owned true headless，不借用用户 Chrome |
-| `backend` | `auto`、`current-chrome`、`headless`、`dsh-embedded`；auto 依用途/身份，不依据任意异常猜测 |
+| `backend` | `auto`、`current-chrome`、`headless`、`dsh-embedded`；auto 依用途/身份：capture 默认内置，automation/web-regression 默认 headless |
 | `browser_identity=prefer-current` | 显式允许仅在真正扩展不可用/可选模块缺失时匿名降级，并报告原因 |
 | 不合法组合 | headless+current、current-chrome+anonymous、automation+current 均拒绝 |
 | 输出目录 | 默认 `~/Downloads/huoqu/`；workspace-write 改用工作区或平台临时目录 |
