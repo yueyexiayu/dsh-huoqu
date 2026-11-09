@@ -4,7 +4,7 @@
 <p><strong>Save the rendered state—not a fictional copy of an entire website.</strong></p>
 <p>Static HTML/MHTML capture and offline verification for DeepSeek Harness.</p>
 <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
-<p><a href="package.json">v0.2.9</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="package.json">v0.2.10</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
 <p><a href="#features">Features</a> · <a href="#how-it-works">How it works</a> · <a href="#quick-start">Quick start</a> · <a href="#purpose-and-identity">Purpose and identity</a> · <a href="#outputs-and-boundaries">Outputs and boundaries</a> · <a href="#validation">Validation</a></p>
 </div>
 
@@ -30,11 +30,13 @@ A reference for a personal desktop workflow. The sidebar offers the DSH embedded
 
 Default capture uses the DSH embedded browser. With `backend: "current-chrome"` it uses the [Chrome plugin](https://github.com/yueyexiayu/dsh-chrome) to create a task-owned background target, without a debug port or takeover of existing tabs. Offline restrictions apply only to the owned shell. The source page's own scripts still run during online loading.
 
-By default (no `backend`, or `backend: "dsh-embedded"`) it uses persistent login data supplied by the DSH embedded browser. The installed DSH Host determines the sharing scope: newer Hosts supporting a global profile can share an identity across workspaces, while older Hosts may isolate it by workspace. A dedicated page is used; it does not copy the current tab's transient DOM state. Embedded source MHTML and screenshots are limited to 128 MiB each; errors do not silently switch identity. Offline verification remains in a separate anonymous shell.
+By default (no `backend`, or `backend: "dsh-embedded"`) it uses persistent login data supplied by the DSH embedded browser. The installed DSH Host determines the sharing scope: newer Hosts supporting a global profile can share an identity across workspaces, while older Hosts may isolate it by workspace. A dedicated page is used; it does not copy the current tab's transient DOM state. MHTML is limited to 512 MiB and screenshots to 128 MiB. Private-network targets are blocked unless `allow_private: true` is explicitly set. Errors do not silently switch identity. Offline verification remains in a separate anonymous shell.
 
 ## Quick start
 
 The pinned browser is verified only on macOS arm64, actually tested on macOS 27.0.1. Darwin major below 22 is rejected. Other architectures, Linux/Windows and other macOS versions are not claimed verified.
+
+The DSH Host must run Node.js 22.17 or newer.
 
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
@@ -44,6 +46,8 @@ npm ci --ignore-scripts
 npm run install:headless
 ```
 
+The repository's `.npmrc` enables `legacy-peer-deps` so npm can install the private browser-policy archive whose metadata contains `workspace:` peer declarations; no root dependency is removed to bypass the check.
+
 Load it as a **desktop profile bundle**. Add `huoqu` in both places in `$DSH_HOME/profiles/desktop/package.json`:
 
 - `dependencies`: `link:$DSH_HOME/plugins/huoqu`
@@ -51,7 +55,7 @@ Load it as a **desktop profile bundle**. Add `huoqu` in both places in `$DSH_HOM
 
 Install the profile so `node_modules/huoqu` resolves to this plugin. **Do not** also `- insert:` the same id in desktop `cordis.patch.yml`; bundling and inserting the same id creates two instances.
 
-**Quit DSH fully with ⌘Q, reopen it and start a new session.** The sidebar shows webpage capture. Chrome capture needs the paired extension; embedded capture needs a Desktop BrowserHost supporting capture. Verify actual sidebar GET `version`, new tool schema and result `pluginVersion` as 0.2.9; disk declarations are not loaded-runtime proof.
+**Quit DSH fully with ⌘Q, reopen it and start a new session.** The sidebar shows webpage capture. Chrome capture needs the paired extension; embedded capture needs a Desktop BrowserHost supporting capture. Verify actual sidebar GET `version`, new tool schema and result `pluginVersion` as 0.2.10; disk declarations are not loaded-runtime proof.
 
 Example anonymous web-regression parameters; the output must be new or a verifiably owned previous capture:
 
@@ -67,10 +71,11 @@ Example anonymous web-regression parameters; the output must be new or a verifia
 | `purpose=automation/web-regression` | `anonymous` + owned true headless, never borrowed Chrome |
 | `backend` | `auto`, `current-chrome`, `headless`, `dsh-embedded`; auto follows purpose/identity: embedded by default for capture, headless for automation/web-regression |
 | `browser_identity=prefer-current` | Explicitly permits anonymous fallback only for genuine extension unavailability/absent optional module, with a reason |
+| `allow_private` | Defaults to `false`; set to `true` only for a trusted loopback, private, link-local or `.local` target. Supported by anonymous headless and current Chrome; the embedded BrowserHost rejects it explicitly |
 | Invalid combinations | headless+current, current-chrome+anonymous and automation+current are rejected |
-| Output | Default `~/Downloads/huoqu/`; workspace-write should use the workspace or platform temporary directory |
+| Output | Defaults to `~/Downloads/huoqu/` with danger-full-access and `<workspace>/huoqu/` with workspace-write |
 
-Protocol, old-extension, permission, engine-version and identity errors never permit fallback. Viewport changes affect only the owned target, not the user's native window. MHTML/resources do not copy credentials; privately authenticated resources unavailable to anonymous fetch are reported.
+Protocol, old-extension, permission, engine-version and identity errors never permit fallback. Viewport changes affect only the owned target, not the user's native window. The plugin does not save cookies or login state, and common credential query parameters are redacted from MHTML metadata, report and manifest. Sensitive content contained in the page body is still preserved as part of the requested static copy. Privately authenticated resources unavailable to anonymous fetch are reported.
 
 <details>
 <summary><strong>Pinned browser installation and integrity</strong></summary>
@@ -92,11 +97,11 @@ The [browser measurement manifest](lib/headless-browser.lock.json) contains loca
 | `source.png` / `local.png` | Source/local preview screenshots |
 | `report.json` / `manifest.json` | Verification, failure reasons and ownership inventory |
 
-- Remove scripts, handlers, embeds and active navigation; add CSP. Offline browsers disable JS and unrestricted cross-file reads. Scrolling triggers lazy content, not business buttons/carousels/fullpage APIs; unrendered or click-only content can be missing.
+- Remove scripts, handlers, embeds and active navigation; add CSP. Offline browsers disable JS and unrestricted cross-file reads. Asset extensions follow verified MIME so an image response cannot become executable HTML through a misleading URL suffix. Scrolling triggers lazy content, not business buttons/carousels/fullpage APIs; unrendered or click-only content can be missing.
 - Ordinary SVG paint may be inlined; active content, duplicate IDs and stylesheets are not promoted into the host DOM. Localization failures remain failures/partial, not fake fidelity by deleting styles. Actual DOCTYPE is retained; short pages are not rejected by the old 1,000-character threshold.
-- Outputs must be empty or proven previous huoqu copies using manifests/reports/resources, not merely named index.html/assets. Replacement failure restores old content; failed restoration preserves and reports the backup.
+- Outputs must be empty or proven previous huoqu copies using manifests/reports/resources, not merely named index.html/assets. Replacement failure restores old content. Interrupted staging/trash transactions are recovered or removed before the next capture using an ownership marker and PID; unknown directories are still refused.
 - `completed` requires complete references, successful offline HTML/MHTML previews, content/image checks and successful browser cleanup; otherwise partial or explicit failure. Cleanup failure blocks publication/replacement and reports retained profiles.
-- At most 1,200 extra resource attempts and 1,000 MiB total reads, including failed responses. Individual ordinary resources: 200 MiB; audio/video: 640 MiB; final MHTML: 1,000 MiB. Removed 404/410 references need not fail the whole capture.
+- At most 1,200 extra resource attempts and 1,000 MiB total reads, including failed responses. Individual ordinary resources: 200 MiB; audio/video: 640 MiB; final MHTML: 512 MiB and assembled incrementally. Removed 404/410 references need not fail the whole capture.
 
 <details>
 <summary><strong>Permissions, background jobs and cancellation</strong></summary>
@@ -116,6 +121,8 @@ node --test test/*.test.mjs
 ```
 
 Host/bridge regression needs the sibling Chrome plugin. Optional `HUOQU_BROWSER_TESTS=1` uses the pinned isolated shell; `DSH_OFFICIAL_ROOT` can target a read-only official package for real SessionStore/policy contracts. Fixtures do not connect to the user's Chrome. Synthetic/source tests do not replace deployed-capture acceptance. Host/Client changes need a full ⌘Q restart and a new session before the sidebar can be accepted.
+
+The default test suite does not require the sibling Chrome plugin. Live Chrome and Desktop BrowserHost still require deployment acceptance.
 
 ## License
 

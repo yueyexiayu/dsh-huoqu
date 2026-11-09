@@ -52,7 +52,7 @@ test("isolated Chrome: no business clicks, no local file read, including live-HT
     for (snapshotFailure of [false, true]) for (const nestedStyle of [false, true]) {
       globalThis.__huoquSnapshotFailure = snapshotFailure;
       const outputDir = path.join(dir, `${snapshotFailure ? "fallback" : "snapshot"}-${nestedStyle ? "nested-style" : "safe"}`);
-      const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/${nestedStyle ? "nested-style" : ""}`, purpose: "web-regression", backend: "headless", output_dir: outputDir, wait_seconds: 0 }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `security-${snapshotFailure}-${nestedStyle}` } });
+      const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/${nestedStyle ? "nested-style" : ""}`, purpose: "web-regression", backend: "headless", output_dir: outputDir, wait_seconds: 0, allow_private: true }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `security-${snapshotFailure}-${nestedStyle}` } });
       const report = JSON.parse(await readFile(path.join(outputDir, "report.json"), "utf8"));
       const html = await readFile(result.indexHtml, "utf8");
       assert.equal(result.browserExecution.mode, "headless"); assert.equal(result.browserExecution.ownership, "owned-process");

@@ -104,6 +104,14 @@ test("normalizeCaptureOptions validates viewport and output path", () => {
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test", width: 120 }), /width must be an integer/);
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test", output_dir: "relative/path" }), /absolute path/);
   assert.throws(() => normalizeCaptureOptions({ url: "https://example.test", output_dir: "/" }), /dedicated project folder/);
+  assert.throws(() => normalizeCaptureOptions({ url: "https://example.test", allow_private: "yes" }), /boolean/);
+});
+
+test("default output root follows the live session policy and private networking is opt-in", () => {
+  const workspace = normalizeCaptureOptions({ url: "https://example.test/" }, { defaultOutputRoot: "/tmp/workspace/huoqu" });
+  assert.ok(workspace.outputDir.startsWith("/tmp/workspace/huoqu/example-test-"));
+  assert.equal(workspace.allowPrivate, false);
+  assert.equal(normalizeCaptureOptions({ url: "http://127.0.0.1/", allow_private: true }).allowPrivate, true);
 });
 
 test("offline preview accepts meaningful short HTML without an absolute markup threshold", () => {

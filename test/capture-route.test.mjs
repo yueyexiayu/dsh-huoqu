@@ -19,11 +19,14 @@ const hook = registerHooks({
           return child;
         }`,
     };
+    if (url === ownerUrl) return {
+      format: "module", shortCircuit: true,
+      source: `export function currentOwner() { return "session-fixture"; }`,
+    };
     if (url !== captureUrl) return nextLoad(url, context);
     return {
       format: "module", shortCircuit: true,
-      source: `import { currentOwner } from ${JSON.stringify(ownerUrl)};
-        import { normalizeCaptureOptions } from ${JSON.stringify(parseUrl)};
+      source: `import { normalizeCaptureOptions } from ${JSON.stringify(parseUrl)};
         export async function capturePage(input, signal, access, operation) {
           const options = normalizeCaptureOptions(input);
           await access.assertWrite(options.outputDir);
@@ -32,7 +35,7 @@ const hook = registerHooks({
           if (input.url.endsWith('/hold')) await new Promise((resolve, reject) => {
             signal.addEventListener('abort', () => reject(signal.reason), {once: true});
           });
-          return {ok: !input.url.endsWith('/partial'), status: input.url.endsWith('/partial') ? 'partial' : 'completed', title: currentOwner(), operation, waitSeconds: options.waitSeconds, indexHtml: '/tmp/huoqu/index.html', warnings: []};
+          return {ok: !input.url.endsWith('/partial'), status: input.url.endsWith('/partial') ? 'partial' : 'completed', title: operation.scope.sessionId, operation, waitSeconds: options.waitSeconds, indexHtml: '/tmp/huoqu/index.html', warnings: []};
         }`,
     };
   },
@@ -140,6 +143,12 @@ test("sidebar capture uses the loaded conversation policy instead of deployment 
     const denied = await post({ url: "https://example.test/good", output_dir: "/Users/ning/Downloads", sessionId: limited.id });
     assert.equal(denied.status, 403);
     assert.match((await denied.json()).error, /cannot modify "\/Users\/ning\/Downloads"/);
+
+    const automatic = await post({ url: "https://example.test/good", sessionId: limited.id });
+    assert.equal(automatic.status, 202);
+    const automaticJob = await automatic.json();
+    assert.ok(automaticJob.outputDir.startsWith("/tmp/huoqu/example-test-"));
+    assert.equal((await settled(automaticJob.jobId, limited.id)).status, "completed");
 
     const before = policyRequests.length;
     const started = await post({ url: "https://example.test/good", output_dir: "/Users/ning/Downloads", sessionId: full.id });

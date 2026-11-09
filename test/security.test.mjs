@@ -35,3 +35,27 @@ test("unarchived file URLs cannot leak local image or stylesheet contents", () =
   const result = materializeMhtml(htmlToMhtml('<img src="file:///tmp/synthetic"><div style="background:url(file:///tmp/synthetic)"></div>', base));
   assert.doesNotMatch(result.html, /file:\/\/\/tmp/);
 });
+
+test("resource extensions follow verified MIME instead of an active URL suffix", () => {
+  const result = materializeMhtml(htmlToMhtml('<img src="/asset.html"><a href="/asset.html">open</a>', base), [{
+    url: `${base}asset.html`,
+    mime: "image/png",
+    bytes: Buffer.from('<script>document.body.dataset.executed="YES"</script>'),
+  }]);
+  assert.equal(result.assets[0].name, "001-asset.png");
+  assert.match(result.html, /<a href="\.\/assets\/001-asset\.png">open<\/a>/);
+  assert.doesNotMatch(result.html, /\.html/);
+
+  const xml = materializeMhtml(htmlToMhtml('<img src="/active.xml">', base), [{
+    url: `${base}active.xml`, mime: "application/xml", bytes: Buffer.from("<html><script>bad()</script></html>"),
+  }]);
+  assert.equal(xml.assets[0].name, "001-active.bin");
+});
+
+test("persisted MHTML locations redact common credential query parameters", () => {
+  const materialized = materializeMhtml(htmlToMhtml("<p>secret-safe archive</p>", `${base}page?token=top-secret&view=1`));
+  const archive = buildMhtml(materialized, `${base}page?token=top-secret&view=1`);
+  assert.doesNotMatch(archive, /top-secret/);
+  assert.match(archive, /token=REDACTED/);
+  assert.match(archive, /view=1/);
+});

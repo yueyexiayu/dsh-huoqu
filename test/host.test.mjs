@@ -46,6 +46,7 @@ test("host entry registers huoqu tool and the declared route", async () => {
   assert.deepEqual(tool.parameters.properties.purpose.enum, ["capture", "automation", "web-regression"]);
   assert.deepEqual(tool.parameters.properties.backend.enum, ["auto", "current-chrome", "headless", "dsh-embedded"]);
   assert.deepEqual(tool.parameters.properties.browser_identity.enum, ["current", "anonymous", "prefer-current", "dsh-embedded"]);
+  assert.equal(tool.parameters.properties.allow_private.type, "boolean");
   assert.equal(tool.output.schema.properties.browserExecution.type, "object");
   assert.equal(tool.output.schema.properties.verificationBrowserExecution.type, "object");
   const list = await route.fetch(new Request("http://dsh.local/api/huoqu?sessionId=fixture"));
@@ -56,7 +57,7 @@ test("host entry registers huoqu tool and the declared route", async () => {
 
 test("installed browser-policy package matches provenance metadata, not the tarball filename", async () => {
   const provenance = JSON.parse(await readFile(new URL("../vendor/browser-execution/provenance.json", import.meta.url), "utf8"));
-  assert.equal(pluginPackage.version, "0.2.9");
+  assert.equal(pluginPackage.version, "0.2.10");
   assert.equal(browserPolicyPackage.version, provenance.version);
   assert.equal(browserPolicyPackage.dshLocalArtifactVersion, provenance.version);
   assert.equal(browserPolicyPackage.dshSourceArtifact?.sourceSha256, provenance.sourceSha256);

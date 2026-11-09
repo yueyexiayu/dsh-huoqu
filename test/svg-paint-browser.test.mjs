@@ -74,7 +74,7 @@ for (const snapshotFailure of [false, true]) for (const rejectStyles of [false, 
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     const { capturePage } = await import(captureUrl);
-    const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/`, purpose: "web-regression", backend: "headless", output_dir: path.join(dir, "capture"), width: 800, height: 600, wait_seconds: 0 }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `svg-${snapshotFailure}-${rejectStyles}` } });
+    const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/`, purpose: "web-regression", backend: "headless", output_dir: path.join(dir, "capture"), width: 800, height: 600, wait_seconds: 0, allow_private: true }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `svg-${snapshotFailure}-${rejectStyles}` } });
     const report = JSON.parse(await readFile(path.join(dir, "capture/report.json"), "utf8"));
     const source = await readFile(path.join(dir, "capture/source.png"));
     const local = await readFile(path.join(dir, "capture/local.png"));

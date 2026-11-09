@@ -112,6 +112,16 @@ test("buildMhtml packages rewritten HTML, stylesheets and assets as a self-conta
   assert.doesNotMatch(reopened.html, /<script\b|bad\(\)/i);
 });
 
+test("streamed MHTML encoding preserves resources spanning multiple base64 chunks", () => {
+  const bytes = Buffer.alloc(57 * 1024 * 3 + 17);
+  for (let index = 0; index < bytes.length; index += 1) bytes[index] = index % 251;
+  const materialized = materializeMhtml(htmlToMhtml('<img src="/large.png">', "https://example.test/"), [{
+    url: "https://example.test/large.png", mime: "image/png", bytes,
+  }]);
+  const parsed = parseMhtml(buildMhtml(materialized, "https://example.test/"));
+  assert.deepEqual(parsed.parts.find((part) => part.id === "huoqu-1").bytes, bytes);
+});
+
 test("htmlToMhtml keeps the live document when the browser snapshot cannot cross the extension bridge", () => {
   const archive = htmlToMhtml("<html><head></head><body>昊华搪瓷</body></html>", "http://www.sdhhtc.com/");
   const parsed = materializeMhtml(archive);

@@ -104,7 +104,7 @@ for (const outcome of ["resolve", "cancel", "reject"]) {
     else pending.folder.resolve(response({ ok: true, cancelled: outcome === "cancel", outputDir: "/tmp/stale-folder" }));
     await choosing; await client.drain();
     const tree = client.render();
-    assert.equal(walk(tree, (node) => node.type === "input")[1].props.value, "/tmp/B");
+    assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "text")[0].props.value, "/tmp/B");
     assert.match(text(tree), /任务状态：running/);
     assert.doesNotMatch(text(tree), /stale folder failure|已选择输出目录/);
     assert.equal(button(tree, "选择文件夹").props.disabled, true);
@@ -151,7 +151,11 @@ test("folder completion after unmount cannot change component state", async () =
 test("mount recovers an existing job, cancel is explicit, and remount restores partial results", async () => {
   const source = await readFile(clientPath, "utf8");
   const requests = [];
-  const job = { jobId: "persisted-job", status: "running", url: "https://example.test/", outputDir: "/tmp/fixture" };
+  const job = {
+    jobId: "persisted-job", status: "running", url: "https://example.test/private?token=REDACTED",
+    retryUrl: "https://example.test/private?token=private-value", outputDir: "/tmp/fixture",
+    backend: "headless", allowPrivate: true,
+  };
   const fetch = async (url, options) => {
     requests.push([url, options]);
     const body = options.body ? JSON.parse(options.body) : null;
@@ -163,6 +167,11 @@ test("mount recovers an existing job, cancel is explicit, and remount restores p
   first.render(); await first.drain();
   let tree = first.render();
   assert.match(text(tree), /running/);
+  assert.match(text(tree), /token=REDACTED/);
+  assert.doesNotMatch(text(tree).replace(walk(tree, (node) => node.type === "input" && node.props.type === "url")[0].props.value, ""), /private-value/);
+  assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "url")[0].props.value, job.retryUrl);
+  assert.equal(walk(tree, (node) => node.type === "select")[0].props.value, "headless");
+  assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "checkbox")[0].props.checked, true);
   assert.match(text(tree), /静态渲染副本/);
   assert.doesNotMatch(text(tree), /保留原站脚本和组件/);
   const cancel = walk(tree, (node) => node.type === "button" && node.children.includes("取消采集"))[0];
@@ -347,14 +356,25 @@ test("useTabInfo tab.sessionId enables capture when props.sessionId is absent", 
     let tree = client.render(props);
     assert.doesNotMatch(text(tree), /未关联当前会话/);
     assert.equal(button(tree, "选择文件夹").props.disabled, false);
+    assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "checkbox")[0].props.disabled, true);
+    assert.match(text(tree), /内置浏览器暂不支持私网采集/);
     const urlInput = walk(tree, (node) => node.type === "input" && node.props.type === "url")[0];
     assert.ok(urlInput, "url field missing");
     urlInput.props.onChange({ target: { value: "https://example.test/page" } });
+    tree = client.render(props);
+    const backendSelect = walk(tree, (node) => node.type === "select")[0];
+    backendSelect.props.onChange({ target: { value: "headless" } });
+    tree = client.render(props);
+    const privateInput = walk(tree, (node) => node.type === "input" && node.props.type === "checkbox")[0];
+    assert.ok(privateInput, "private-network opt-in missing");
+    privateInput.props.onChange({ target: { checked: true } });
     tree = client.render(props);
     await walk(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
     await client.drain();
     const capture = bodies.find((body) => body.action === "capture");
     assert.equal(capture?.sessionId, "from-tab");
+    assert.equal(capture?.backend, "headless");
+    assert.equal(capture?.allow_private, true);
   } finally { client.unmount(); }
 });
 
@@ -381,9 +401,11 @@ test("session change clears prior jobs/results and ignores late old-session list
     client.render({ sessionId: "A" });
     const inputs = walk(client.render({ sessionId: "A" }), (node) => node.type === "input");
     inputs[0].props.onChange({ target: { value: "https://example.test/private-A" } });
-    inputs[1].props.onChange({ target: { value: "/tmp/private-A" } });
+    inputs[2].props.onChange({ target: { value: "/tmp/private-A" } });
     client.render({ sessionId: "B" }); await client.drain();
-    assert.ok(walk(client.render({ sessionId: "B" }), (node) => node.type === "input").every((node) => node.props.value === ""));
+    const nextInputs = walk(client.render({ sessionId: "B" }), (node) => node.type === "input");
+    assert.ok(nextInputs.filter((node) => node.props.type === "text").every((node) => node.props.value === ""));
+    assert.equal(nextInputs.find((node) => node.props.type === "checkbox").props.checked, false);
     old.resolve(response({ ok: true, jobs: [{ jobId: "old", status: "completed", url: "https://example.test/private-A", outputDir: "/tmp/private-A" }] }));
     await client.drain();
     assert.doesNotMatch(text(client.render({ sessionId: "B" })), /private-A/);

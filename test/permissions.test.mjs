@@ -62,6 +62,7 @@ test("workspace fence canonicalizes roots, checks both rename endpoints and bloc
   try {
     await mkdir(workspace); await mkdir(outside);
     const access = await createCaptureAccess(context({ mode: "workspace-write", workspaceRoot: workspace }));
+    assert.equal(await access.defaultOutputRoot(), path.join(workspace, "huoqu"));
     await access.assertWrite(path.join(workspace, "stage"), path.join(workspace, "assets", "a.png"));
     await assert.rejects(access.assertWrite(path.join(workspace, "source"), path.join(outside, "destination")), denied);
     await symlink(outside, path.join(workspace, "escape"));

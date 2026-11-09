@@ -31,7 +31,7 @@ for (const fallback of [false, true]) for (const standards of [false, true]) {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     try {
       const { capturePage } = await import(captureUrl);
-      const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/short`, purpose: 'web-regression', backend: 'headless', output_dir: path.join(dir, 'capture'), width: 800, height: 600, wait_seconds: 0 }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `short-${fallback}-${standards}` } });
+      const result = await capturePage({ url: `http://127.0.0.1:${server.address().port}/short`, purpose: 'web-regression', backend: 'headless', output_dir: path.join(dir, 'capture'), width: 800, height: 600, wait_seconds: 0, allow_private: true }, undefined, undefined, { cwd: dir, scope: { sessionId: `huoqu-browser-test:${process.pid}`, taskId: `short-${fallback}-${standards}` } });
       const report = JSON.parse(await readFile(path.join(result.outputDir, 'report.json'), 'utf8'));
       assert.equal(result.status, 'completed');
       assert.equal(result.pluginVersion, pluginPackage.version); assert.equal(report.pluginVersion, pluginPackage.version);

@@ -146,6 +146,35 @@ test("transaction guards both rename endpoints and policy rejection restores old
   });
 });
 
+test("startup recovery rolls an interrupted replacement back to the previous owned copy", async () => {
+  await temporaryDirectory(async (dir) => {
+    await previousCapture(dir);
+    const staleStage = path.join(dir, ".huoqu-staging-2147483646-abandoned");
+    const trash = path.join(dir, ".huoqu-replaced-2147483646-1");
+    await fs.mkdir(staleStage);
+    await fs.writeFile(path.join(staleStage, ".huoqu-stage.json"), JSON.stringify({
+      producer: "huoqu", formatVersion: 1, pid: 2147483646,
+    }));
+    await fs.mkdir(trash);
+    await fs.writeFile(path.join(trash, ".huoqu-transaction.json"), JSON.stringify({
+      producer: "huoqu", formatVersion: 1, pid: 2147483646,
+      stageName: path.basename(staleStage), oldNames: ["assets", "index.html", "index.mhtml", "manifest.json", "report.json"],
+      newNames: ["assets", "index.html", "index.mhtml", "manifest.json", "report.json"],
+    }));
+    for (const name of ["assets", "index.html", "index.mhtml", "manifest.json", "report.json"]) {
+      await fs.rename(path.join(dir, name), path.join(trash, name));
+    }
+    await fs.writeFile(path.join(dir, "index.html"), "partially promoted page");
+
+    const recoveredStage = await createOutputStage(dir);
+    assert.ok(recoveredStage.startsWith(path.join(dir, ".huoqu-staging-")));
+    assert.equal(await fs.readFile(path.join(dir, "index.html"), "utf8"), "original page");
+    assert.equal(await fs.readFile(path.join(dir, "assets", "old.css"), "utf8"), "original asset");
+    assert.equal(await fs.stat(trash).then(() => true, () => false), false);
+    assert.equal(await fs.stat(staleStage).then(() => true, () => false), false);
+  });
+});
+
 // Import the actual capture implementation; substitute only browser I/O and
 // rendering waits, keeping capturePage, cleanup, filesystem and locks intact.
 async function captureHarness() {
@@ -178,6 +207,7 @@ async function captureHarness() {
     // Synthetic browser I/O still uses the real owned-handle cleanup path. This
     // registration exists only in the in-memory fixture, never in product code.
     export function fixtureOwnedHandle(handle, record) { OWNED_CHROME.set(handle, record); return handle; }
+    resolveHostname = async () => [{ address: '93.184.216.34', family: 4 }];
     export function useResolver(fn) { resolveHostname = fn; }`;
   const mod = await import(`data:text/javascript;base64,${Buffer.from(source + hooks).toString("base64")}#${Math.random()}`);
   const operation = { cwd: process.cwd(), scope: { sessionId: 'capture-unit', taskId: `batch-${Math.random()}` } };
@@ -257,6 +287,21 @@ test("borrowed source preserves viewport/UA while offline controls belong only t
   });
 });
 
+test("captured metadata redacts credential query parameters without changing the live source request", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const liveUrl = "https://example.test/private?token=top-secret&view=1";
+    const { browser, state } = fixtureBrowser({ summary: { url: liveUrl } });
+    mod.useBrowser(browser);
+    const result = await mod.capturePage({ url: liveUrl, output_dir: dir });
+    assert.match(result.url, /token=REDACTED/);
+    assert.equal(state.methods.find((call) => call.method === "Page.navigate")?.params.url, liveUrl);
+    for (const name of ["report.json", "manifest.json", "index.mhtml", "README.md"]) {
+      assert.doesNotMatch(await fs.readFile(path.join(dir, name), "utf8"), /top-secret/);
+    }
+  });
+});
+
 function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fixture content. ".repeat(100)}</body></html>`, mode = "extension", snapshot = "", snapshotError, summary: summaryOverrides = {}, responses = [], fileResponses = [] } = {}) {
   const state = { closes: 0, navigations: 0, stopped: 0, methods: [] };
   const listeners = new Set();
@@ -267,8 +312,8 @@ function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fi
       close: async () => { state.closes++; if (closeError) throw new Error(closeError); },
       onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       waitForEvent: async () => ({}),
-      send: async (method, params) => {
-        state.methods.push({ method, params });
+      send: async (method, params, sessionId) => {
+        state.methods.push({ method, params, sessionId });
         if (method === "Target.createTarget") return { targetId: "fixture" };
         if (method === "Target.attachToTarget") return { sessionId: "fixture" };
         if (method === "Target.closeTarget") throw new Error("unsupported by extension");
@@ -277,7 +322,7 @@ function fixtureBrowser({ closeError, navigationError, html = `<html><body>${"Fi
           state.navigations++;
           if (navigationError) throw new Error(navigationError);
           const events = String(params?.url || "").startsWith("file:") ? [...responses, ...fileResponses] : responses;
-          for (const event of events) for (const listener of listeners) listener({ sessionId: "fixture", ...event });
+          for (const event of events) for (const listener of listeners) await listener({ sessionId: "fixture", ...event });
         }
         if (method === "Page.captureSnapshot") {
           if (snapshotError) throw new Error(snapshotError);
@@ -318,7 +363,7 @@ test("embedded capture uses owned chunks and separate anonymous verifier; closes
     const calls = [];
     const desktopBrowser = { async execute(request) {
       calls.push(request);
-      if (request.action === "capture_start") return { captureId: "capture-1", sourcePage: { url: "https://example.test/", title: "Fixture",
+      if (request.action === "capture_start") return { captureId: "capture-1", sourcePage: { url: "https://93.184.216.34/", title: "Fixture",
         viewport: { width: 1440, height: 1000 }, document: { width: 1440, height: 1000, htmlBytes: html.length, textLength: 60 }, images: [], stylesheets: [], scripts: 0 },
         networkEvidence: [], networkFailures: [], warnings: [], scrollResult: { scrollHeight: 1000, scrollSteps: 1 },
         engine: { browserVersion: "145.0.7632.6" }, mhtmlBytes: files.mhtml.length, screenshotBytes: files.screenshot.length };
@@ -328,7 +373,7 @@ test("embedded capture uses owned chunks and separate anonymous verifier; closes
     } };
     const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "embedded-task" }, desktopBrowser };
     const outputDir = path.join(dir, "out");
-    const result = await mod.capturePage({ url: "https://example.test/", output_dir: outputDir, backend: "dsh-embedded" }, undefined, undefined, operation);
+    const result = await mod.capturePage({ url: "https://93.184.216.34/", output_dir: outputDir, backend: "dsh-embedded" }, undefined, undefined, operation);
     assert.equal(result.status, "completed");
     assert.equal(result.browserExecution.actualIdentity, "dsh-embedded");
     assert.equal(result.browserExecution.mode, "hidden-window");
@@ -346,7 +391,17 @@ test("embedded capture uses owned chunks and separate anonymous verifier; closes
 test("embedded capture fails without its Desktop service and cleans its stage", async () => {
   await temporaryDirectory(async dir => {
     const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "no-service" } };
-    await assert.rejects(capturePage({ url: "https://example.test/", output_dir: dir, backend: "dsh-embedded" }, undefined, undefined, operation), /内置浏览器采集服务不可用/);
+    await assert.rejects(capturePage({ url: "https://93.184.216.34/", output_dir: dir, backend: "dsh-embedded" }, undefined, undefined, operation), /内置浏览器采集服务不可用/);
+    assert.deepEqual(await fs.readdir(dir), []);
+  });
+});
+
+test("embedded capture rejects private-network opt-in instead of silently ignoring it", async () => {
+  await temporaryDirectory(async dir => {
+    const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "private-unsupported" } };
+    await assert.rejects(capturePage({
+      url: "http://127.0.0.1/", output_dir: dir, backend: "dsh-embedded", allow_private: true,
+    }, undefined, undefined, operation), /内置浏览器暂不支持私网采集/);
     assert.deepEqual(await fs.readdir(dir), []);
   });
 });
@@ -356,7 +411,7 @@ test("embedded incomplete chunk fails and closes the capture", async () => {
     const calls = [];
     const desktopBrowser = { async execute(request) {
       calls.push(request.action);
-      if (request.action === "capture_start") return { captureId: "capture-1", sourcePage: { url: "https://example.test/", title: "Fixture",
+      if (request.action === "capture_start") return { captureId: "capture-1", sourcePage: { url: "https://93.184.216.34/", title: "Fixture",
         viewport: { width: 800, height: 600 }, document: { width: 800, height: 600, htmlBytes: 50, textLength: 30 }, images: [], stylesheets: [], scripts: 0 },
         networkEvidence: [], networkFailures: [], warnings: [], scrollResult: { scrollHeight: 600, scrollSteps: 1 },
         engine: { browserVersion: "145.0.7632.6" }, mhtmlBytes: 128, screenshotBytes: 8 };
@@ -365,7 +420,7 @@ test("embedded incomplete chunk fails and closes the capture", async () => {
       throw new Error("unexpected request");
     } };
     const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "bad-chunk" }, desktopBrowser };
-    await assert.rejects(capturePage({ url: "https://example.test/", output_dir: dir, backend: "dsh-embedded" }, undefined, undefined, operation), /Incomplete embedded capture chunk/);
+    await assert.rejects(capturePage({ url: "https://93.184.216.34/", output_dir: dir, backend: "dsh-embedded" }, undefined, undefined, operation), /Incomplete embedded capture chunk/);
     assert.deepEqual(calls, ["capture_start", "capture_read", "capture_close"]);
     assert.deepEqual(await fs.readdir(dir), []);
   });
@@ -601,12 +656,13 @@ test("capture refuses a public name that resolves to a private address before na
   });
 });
 
-test("capture allows an explicitly requested private host and rejects a different final host", async () => {
+test("capture requires an explicit opt-in for private hosts", async () => {
   await temporaryDirectory(async (dir) => {
     const mod = await captureHarness();
     const allowed = fixtureBrowser({ summary: { url: "http://127.0.0.1/" } });
     mod.useBrowser(allowed.browser);
-    const result = await mod.capturePage({ url: "http://127.0.0.1/", output_dir: dir });
+    await assert.rejects(mod.capturePage({ url: "http://127.0.0.1/", output_dir: dir }), /private\/local/);
+    const result = await mod.capturePage({ url: "http://127.0.0.1/", output_dir: dir, allow_private: true });
     assert.equal(result.status, "completed");
     assert.equal(allowed.state.navigations + (allowed.state.verifier?.navigations || 0), 3);
   });
@@ -614,27 +670,65 @@ test("capture allows an explicitly requested private host and rejects a differen
     const mod = await captureHarness();
     const redirected = fixtureBrowser({ summary: { url: "http://localhost/" } });
     mod.useBrowser(redirected.browser);
-    await assert.rejects(mod.capturePage({ url: "http://127.0.0.1/", output_dir: dir }), /private\/local/);
-    assert.equal(redirected.state.navigations, 1);
-    assert.deepEqual(await fs.readdir(dir), []);
+    const result = await mod.capturePage({ url: "http://127.0.0.1/", output_dir: dir, allow_private: true });
+    assert.equal(result.status, "completed");
+    assert.ok(redirected.state.navigations > 0);
   });
 });
 
-test("a private remote address for a different host aborts before promotion", async () => {
+test("private subresource requests are blocked at the CDP request stage", async () => {
   await temporaryDirectory(async (dir) => {
     const mod = await captureHarness();
-    const { browser, state } = fixtureBrowser({
-      responses: [{
-        method: "Network.responseReceived",
-        params: { requestId: "1", response: { url: "http://169.254.169.254/latest/meta-data/", remoteIPAddress: "169.254.169.254" } },
-      }],
-    });
+    const { browser, state } = fixtureBrowser({ responses: [{
+      method: "Fetch.requestPaused",
+      params: { requestId: "private-request", request: { url: "http://169.254.169.254/latest/meta-data/" } },
+    }] });
     mod.useBrowser(browser);
     await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: dir }), /private\/local/);
-    assert.equal(state.navigations, 1);
-    assert.equal(state.stopped, 1);
-    assert.deepEqual(await fs.readdir(dir), []);
-    assert.equal(mod.OUTPUT_LOCKS.size, 0);
+    assert.ok(state.methods.some((call) => call.method === "Fetch.failRequest" && call.params.requestId === "private-request" && call.sessionId === "fixture"));
+    assert.equal(state.methods.some((call) => call.method === "Fetch.continueRequest" && call.params.requestId === "private-request"), false);
+  });
+});
+
+test("public requests continue on the child CDP session", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const { browser, state } = fixtureBrowser({ responses: [{
+      method: "Fetch.requestPaused",
+      params: { requestId: "public-request", request: { url: "https://example.test/" } },
+    }] });
+    mod.useBrowser(browser);
+    const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir });
+    assert.equal(result.status, "completed");
+    assert.ok(state.methods.some((call) => call.method === "Fetch.continueRequest"
+      && call.params.requestId === "public-request" && call.sessionId === "fixture"));
+  });
+});
+
+test("a local proxy remote address does not classify a public page as private", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    const { browser } = fixtureBrowser({ responses: [{
+      method: "Network.responseReceived",
+      params: { requestId: "proxied", response: { url: "https://example.test/", remoteIPAddress: "127.0.0.1" } },
+    }] });
+    mod.useBrowser(browser);
+    const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir });
+    assert.equal(result.status, "completed");
+  });
+});
+
+test("DNS rebinding to a private address is caught when the response hostname is rechecked", async () => {
+  await temporaryDirectory(async (dir) => {
+    const mod = await captureHarness();
+    let lookups = 0;
+    mod.useResolver(async () => [{ address: lookups++ === 0 ? "93.184.216.34" : "127.0.0.1", family: 4 }]);
+    const { browser } = fixtureBrowser({ responses: [{
+      method: "Network.responseReceived",
+      params: { requestId: "rebind", response: { url: "https://example.test/", remoteIPAddress: "127.0.0.1" } },
+    }] });
+    mod.useBrowser(browser);
+    await assert.rejects(mod.capturePage({ url: "https://example.test/", output_dir: dir }), /private\/local/);
   });
 });
 
@@ -667,7 +761,7 @@ test("offline validation ignores only a non-empty image disconnected by offline 
       { url: file(font), error: disconnected },
       { url: "https://cdn.example/app.css", error: disconnected },
     ]);
-    assert.equal(split.ignored, 1);
+    assert.equal(split.ignored.length, 1);
     assert.equal(split.blocking.length, 5);
     assert.ok(split.blocking.some((failure) => failure.url.endsWith("app.css")));
     assert.ok(split.blocking.some((failure) => failure.url.endsWith("face.woff2")));
@@ -693,8 +787,10 @@ for (const [label, name, errorText, ok] of [
         const result = await mod.capturePage({ url: "https://example.test/", output_dir: dir });
         assert.equal(result.ok, ok);
         assert.equal(result.status, ok ? "completed" : "partial");
+        assert.equal(result.networkFailures, 0, "offline simulation failures must not be counted as source failures");
         const report = JSON.parse(await fs.readFile(path.join(dir, "report.json"), "utf8"));
         assert.equal(report.offlineValidation.result, ok ? "passed" : "partial");
+        assert.deepEqual(report.networkFailures, []);
         if (!ok && /\.(?:css|woff2)$/.test(name)) {
           assert.match(report.offlineValidation.htmlIssues.join("\n"), /样式或字体加载失败/);
         }

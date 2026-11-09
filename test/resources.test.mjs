@@ -33,7 +33,7 @@ test("1300 same-origin resources cause no more than 1200 real HTTP requests", as
   await withServer((_req, res) => { hits++; res.setHeader("content-type", "image/png"); res.end("fixture"); }, async (port) => {
     const url = `http://127.0.0.1:${port}/page`;
     const mhtml = htmlToMhtml(Array.from({ length: 1300 }, (_, i) => `<img src="/${i}.png">`).join(""), url);
-    const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), url);
+    const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), url, undefined, { allowPrivate: true });
     assert.equal(hits, 1200);
     assert.equal(result.resources.length, 1200);
     assert.equal(result.materialized.externalReferences.length, 100);
@@ -46,7 +46,7 @@ test("failed downloads count toward the request limit too", async () => {
   await withServer((_req, res) => { hits++; res.writeHead(404); res.end(); }, async (port) => {
     const url = `http://127.0.0.1:${port}/page`;
     const mhtml = htmlToMhtml(Array.from({ length: 1300 }, (_, i) => `<img src="/${i}.png">`).join(""), url);
-    const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), url);
+    const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), url, undefined, { allowPrivate: true });
     assert.equal(hits, 1200);
     assert.equal(result.resources.length, 0);
   });
@@ -83,7 +83,7 @@ test("duplicate redirect targets preserve all request aliases", async () => {
   }, async (port) => {
     const url = `http://127.0.0.1:${port}/page`;
     const mhtml = htmlToMhtml('<img src="/a.png"><img src="/b.png">', url);
-    const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), url);
+    const result = await completeExternalResources(mhtml, materializeMhtml(mhtml), url, undefined, { allowPrivate: true });
     assert.equal(result.materialized.assets.length, 1);
     assert.deepEqual(result.materialized.externalReferences, []);
     assert.equal((result.materialized.html.match(/src="\.\/assets\/001-shared.png"/g) || []).length, 2);

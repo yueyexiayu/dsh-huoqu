@@ -57,6 +57,21 @@ test("partial capture is a distinct recoverable terminal result, never completed
   } finally { await manager.dispose(); }
 });
 
+test("job summaries redact credential query parameters while retaining the private execution URL", async () => {
+  const manager = createJobManager(async (_options, signal) => new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  }));
+  try {
+    const job = manager.start({ ...options, url: "https://example.test/page?token=private&view=1" }, session);
+    assert.equal(job.options.url, "https://example.test/page?token=private&view=1");
+    const summary = manager.list(session)[0];
+    assert.equal(summary.url, "https://example.test/page?token=REDACTED&view=1");
+    assert.equal(summary.retryUrl, job.options.url);
+    manager.cancel(job.id, session);
+    await job.promise;
+  } finally { await manager.dispose(); }
+});
+
 test("timeout starts at enqueue and holds the running slot through cooperative cleanup", async () => {
   let finishCleanup;
   let calls = 0;

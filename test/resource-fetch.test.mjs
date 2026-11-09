@@ -15,7 +15,7 @@ const hook = registerHooks({
       format: "module",
       shortCircuit: true,
       source: `${source}
-export { assertAllowedResource, assertNavigationAllowed, privateRemoteAddressError, pinnedResourceRequest, fetchExtraResource, completeExternalResources, resolveHostname };
+export { assertAllowedResource, assertNavigationAllowed, pinnedResourceRequest, fetchExtraResource, completeExternalResources, resolveHostname };
 export function useResolver(fn) { resolveHostname = fn; }
 export function usePinnedResourceRequest(fn) { pinnedResourceRequest = fn; }
 `,
@@ -25,7 +25,6 @@ export function usePinnedResourceRequest(fn) { pinnedResourceRequest = fn; }
 const {
   assertAllowedResource,
   assertNavigationAllowed,
-  privateRemoteAddressError,
   pinnedResourceRequest,
   fetchExtraResource,
   completeExternalResources,
@@ -34,8 +33,12 @@ const {
   usePinnedResourceRequest,
 } = await import(captureUrl);
 hook.deregister();
-const originalResolveHostname = resolveHostname;
-const originalPinnedResourceRequest = pinnedResourceRequest;
+const publicResolver = async () => [{ address: "8.8.8.8", family: 4 }];
+const fetchBackedPinnedRequest = async (url, options = {}) => globalThis.fetch(url.href, {
+  redirect: "manual", headers: options.headers, signal: options.signal,
+});
+useResolver(publicResolver);
+usePinnedResourceRequest(fetchBackedPinnedRequest);
 
 function imageArchive(count, sourceUrl = "https://example.test/") {
   const html = `<html><body>${Array.from({ length: count }, (_, index) => `<img src="${sourceUrl}${index}.png">`).join("")}</body></html>`;
@@ -50,11 +53,11 @@ test("cross-origin IPv4-mapped IPv6 private resources are rejected", async () =>
   await assertAllowedResource(new URL("https://[::ffff:8.8.8.8]/image.png"), "https://example.test");
 });
 
-test("private resources on the explicitly selected request host remain allowed", async () => {
+test("private resources require an explicit allow_private opt-in", async () => {
   for (const host of ["127.0.0.1", "[::ffff:127.0.0.1]", "localhost"]) {
     const url = new URL(`http://${host}/image.png`);
-    await assertAllowedResource(url, url.origin);
-    await assertAllowedResource(url, `http://${host}/page`);
+    await assert.rejects(assertAllowedResource(url, url.origin), /private\/local/);
+    await assertAllowedResource(url, `http://${host}/page`, { allowPrivate: true });
   }
   await assert.rejects(assertAllowedResource(new URL("http://127.0.0.1/image.png"), "https://example.test/"), /private\/local/);
   await assert.rejects(assertAllowedResource(new URL("http://localhost/image.png"), "http://127.0.0.1/page"), /private\/local/);
@@ -204,9 +207,10 @@ test("cancelled completion rejects before initiating any resource request", asyn
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test("navigation allows the same explicit private host and rejects a different private host", async () => {
-  await assertNavigationAllowed("http://127.0.0.1/page", "http://127.0.0.1/other");
-  await assertNavigationAllowed("http://localhost./page", "http://localhost/other");
+test("navigation requires an explicit private-network opt-in", async () => {
+  await assert.rejects(assertNavigationAllowed("http://127.0.0.1/page", "http://127.0.0.1/other"), /private\/local/);
+  await assertNavigationAllowed("http://127.0.0.1/page", "http://127.0.0.1/other", { allowPrivate: true });
+  await assertNavigationAllowed("http://localhost./page", "http://localhost/other", { allowPrivate: true });
   await assertNavigationAllowed("https://example.test./page", "https://example.test/other");
   for (const target of [
     "http://127.0.0.1/",
@@ -233,31 +237,19 @@ test("a public name that resolves to a private address is rejected before naviga
     await assert.rejects(assertNavigationAllowed("https://rebind.example/", "https://rebind.example/"), /private\/local/);
     await assert.rejects(assertNavigationAllowed("https://example.test/", "https://rebind.example/moved"), /private\/local/);
   } finally {
-    useResolver(originalResolveHostname);
+    useResolver(publicResolver);
   }
 });
 
-test("explicit private hosts skip the public-name resolution check", async () => {
+test("explicit private hosts skip public resolution only after opt-in", async () => {
   useResolver(async () => { throw new Error("must not resolve an explicit private host"); });
   try {
-    await assertNavigationAllowed("http://127.0.0.1/", "http://127.0.0.1/x");
-    await assertNavigationAllowed("http://localhost/", "http://localhost/x");
-    await assertNavigationAllowed("http://printer.local/", "http://printer.local/x");
+    await assertNavigationAllowed("http://127.0.0.1/", "http://127.0.0.1/x", { allowPrivate: true });
+    await assertNavigationAllowed("http://localhost/", "http://localhost/x", { allowPrivate: true });
+    await assertNavigationAllowed("http://printer.local/", "http://printer.local/x", { allowPrivate: true });
   } finally {
-    useResolver(originalResolveHostname);
+    useResolver(publicResolver);
   }
-});
-
-test("private remote addresses abort only when the request host differs", () => {
-  assert.equal(privateRemoteAddressError("", "http://cdn.example/", "https://example.test/"), null);
-  assert.equal(privateRemoteAddressError(undefined, "http://10.0.0.1/", "https://example.test/"), null);
-  assert.equal(privateRemoteAddressError("8.8.8.8", "http://cdn.example/", "https://example.test/"), null);
-  assert.equal(privateRemoteAddressError("127.0.0.1", "http://127.0.0.1/x", "http://127.0.0.1/page"), null);
-  assert.equal(privateRemoteAddressError("127.0.0.1", "file:///tmp/index.html", "https://example.test/"), null);
-  assert.match(privateRemoteAddressError("169.254.169.254", "http://169.254.169.254/latest", "https://example.test/").message, /private\/local/);
-  assert.match(privateRemoteAddressError("::1", "http://[::1]/", "https://example.test/").message, /private\/local/);
-  assert.match(privateRemoteAddressError("::ffff:127.0.0.1", "http://127.0.0.1/", "https://example.test/").message, /private\/local/);
-  assert.match(privateRemoteAddressError("10.0.0.1", "", "https://example.test/").message, /private\/local/);
 });
 
 test("cross-host fetch pins each redirect hop and does not fetch by hostname", async () => {
@@ -285,8 +277,28 @@ test("cross-host fetch pins each redirect hop and does not fetch by hostname", a
     assert.equal(result.bytes.toString(), "fixture");
   } finally {
     globalThis.fetch = originalFetch;
-    useResolver(originalResolveHostname);
-    usePinnedResourceRequest(originalPinnedResourceRequest);
+    useResolver(publicResolver);
+    usePinnedResourceRequest(fetchBackedPinnedRequest);
+  }
+});
+
+test("same-host resources are pinned too, preventing DNS rebinding between checks", async () => {
+  const calls = [];
+  useResolver(async () => [{ address: "8.8.8.8", family: 4 }]);
+  usePinnedResourceRequest(async (url, options) => {
+    calls.push({ host: url.hostname, address: options.address });
+    return new Response("fixture", { headers: { "content-type": "image/png" } });
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("same-host resources must not resolve the hostname again");
+  try {
+    const result = await fetchExtraResource("https://example.test/app.png", "https://example.test/page");
+    assert.equal(result.bytes.toString(), "fixture");
+    assert.deepEqual(calls, [{ host: "example.test", address: "8.8.8.8" }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    useResolver(publicResolver);
+    usePinnedResourceRequest(fetchBackedPinnedRequest);
   }
 });
 
@@ -299,8 +311,8 @@ test("a public resource redirect to a private host is rejected before connect", 
   try {
     await assert.rejects(fetchExtraResource("https://cdn.example/app.png", "https://example.test/"), /private\/local/);
   } finally {
-    useResolver(originalResolveHostname);
-    usePinnedResourceRequest(originalPinnedResourceRequest);
+    useResolver(publicResolver);
+    usePinnedResourceRequest(fetchBackedPinnedRequest);
   }
 });
 

@@ -4,7 +4,7 @@
 <p><strong>保存当前渲染状态，而不是假装复制整个网站。</strong></p>
 <p>DeepSeek Harness 的静态 HTML / MHTML 采集与离线核验插件。</p>
 <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
-<p><a href="package.json">v0.2.9</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="package.json">v0.2.10</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
 <p><a href="#核心能力">核心能力</a> · <a href="#工作方式">工作方式</a> · <a href="#快速开始">快速开始</a> · <a href="#用途与身份">用途与身份</a> · <a href="#产物与边界">产物与边界</a> · <a href="#验证">验证</a></p>
 </div>
 
@@ -30,11 +30,13 @@
 
 默认 capture 从 DSH 内置浏览器采集；选择 `backend: "current-chrome"` 时经[Chrome 插件](https://github.com/yueyexiayu/dsh-chrome)创建本任务独占的后台 target，不开调试端口、不接管现有标签。离线限制仅施加到自有 shell，不污染借用 Chrome。源站在线加载仍会执行源站自身脚本。
 
-默认（未指定 `backend` 或 `backend: "dsh-embedded"`）使用 DSH 内置浏览器提供的持久登录资料，在专用采集页面访问 URL；资料共享范围由当前 DSH Host 决定，支持全局共享的新版可跨工作区使用同一身份，旧版可能按工作区隔离。不会复制当前标签的 sessionStorage、SPA 内存或未保存表单。Desktop 服务不可用、身份或网络策略不能满足时明确失败，不回落 Chrome 或匿名。内置采集的源 MHTML 和截图各有 128 MiB 上限，超过时失败；Chrome 和无头后端保留原有上限。受登录保护资源的补全无法访问或网络策略受限时标记 partial；离线校验始终使用独立匿名 shell。
+默认（未指定 `backend` 或 `backend: "dsh-embedded"`）使用 DSH 内置浏览器提供的持久登录资料，在专用采集页面访问 URL；资料共享范围由当前 DSH Host 决定，支持全局共享的新版可跨工作区使用同一身份，旧版可能按工作区隔离。不会复制当前标签的 sessionStorage、SPA 内存或未保存表单。Desktop 服务不可用、身份或网络策略不能满足时明确失败，不回落 Chrome 或匿名。MHTML 上限 512 MiB，截图上限 128 MiB。私网目标默认阻止；只有显式设置 `allow_private: true` 才允许 loopback、私网、链路本地和本地域名。受登录保护资源的补全无法访问或网络策略受限时标记 partial；离线校验始终使用独立匿名 shell。
 
 ## 快速开始
 
 当前固定浏览器仅验收 macOS arm64；实际环境为 macOS27.0.1，Darwin major低于22拒绝。其他架构、Linux/Windows及其他 macOS 版本不宣称已验收。
+
+DSH Host 必须使用 Node.js 22.17 或更高版本。
 
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
@@ -44,6 +46,8 @@ npm ci --ignore-scripts
 npm run install:headless
 ```
 
+仓库内 `.npmrc` 启用 `legacy-peer-deps`，用于安装带 `workspace:` peer 声明的私有 browser-policy 归档；这不是通过减少根依赖来规避校验。
+
 作为 **desktop profile bundle** 加载。在 `$DSH_HOME/profiles/desktop/package.json` 两处都加上 `huoqu`：
 
 - `dependencies`：`link:$DSH_HOME/plugins/huoqu`
@@ -51,7 +55,7 @@ npm run install:headless
 
 在该 profile 目录安装依赖，使 `node_modules/huoqu` 解析到本插件。**禁止**再在 desktop `cordis.patch.yml` 里 `- insert:` 同一 id；同一 id 既 bundle 又 insert 会变成两个实例。
 
-**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。选用当前 Chrome 身份时需要配套插件及扩展；内置身份需要支持采集的 Desktop BrowserHost。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为 0.2.9，不能用磁盘版本冒充已加载。
+**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。选用当前 Chrome 身份时需要配套插件及扩展；内置身份需要支持采集的 Desktop BrowserHost。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为 0.2.10，不能用磁盘版本冒充已加载。
 
 以下为匿名网页回归参数示例；输出路径须是全新目录或可核对归属的既有副本：
 
@@ -67,10 +71,11 @@ npm run install:headless
 | `purpose=automation/web-regression` | `anonymous` + owned true headless，不借用用户 Chrome |
 | `backend` | `auto`、`current-chrome`、`headless`、`dsh-embedded`；auto 依用途/身份：capture 默认内置，automation/web-regression 默认 headless |
 | `browser_identity=prefer-current` | 显式允许仅在真正扩展不可用/可选模块缺失时匿名降级，并报告原因 |
+| `allow_private` | 默认 `false`；显式设为 `true` 才允许本机、私网、链路本地及 `.local` 地址，适用于匿名无头或当前 Chrome；内置 BrowserHost 暂不支持，会明确拒绝 |
 | 不合法组合 | headless+current、current-chrome+anonymous、automation+current 均拒绝 |
-| 输出目录 | 默认 `~/Downloads/huoqu/`；workspace-write 改用工作区或平台临时目录 |
+| 输出目录 | danger-full-access 默认 `~/Downloads/huoqu/`；workspace-write 默认 `<workspace>/huoqu/` |
 
-协议、旧扩展、权限、引擎版本及身份错误不允许降级。viewport只调整本任务 target，不移动用户原生窗口；MHTML/资源不携带登录凭据，无法匿名获取的私有素材如实报告。
+协议、旧扩展、权限、引擎版本及身份错误不允许降级。viewport只调整本任务 target，不移动用户原生窗口。插件不保存 Cookie/登录态，并会脱敏 MHTML 元数据、report 和 manifest 中常见认证查询参数；页面正文自身包含的敏感数据仍会按静态副本规则保存。无法匿名获取的私有素材如实报告。
 
 <details>
 <summary><strong>固定浏览器安装、版本与校验</strong></summary>
@@ -92,11 +97,11 @@ npm run install:headless
 | `source.png` / `local.png` | 源站与本地预览截图 |
 | `report.json` / `manifest.json` | 验证结果、失败原因与归属清单 |
 
-- 去除脚本、事件、嵌入页及主动跳转，添加 CSP；离线浏览器禁 JS、不开放跨本地文件读取特权。滚动以加载懒内容，但不自动点击业务按钮/轮播/fullpage API，未渲染或需点击的内容可缺失。
+- 去除脚本、事件、嵌入页及主动跳转，添加 CSP；离线浏览器禁 JS、不开放跨本地文件读取特权。资源保存后缀以可信 MIME 为准，禁止 URL 后缀把声明为图片的内容变成可执行 HTML。滚动以加载懒内容，但不自动点击业务按钮/轮播/fullpage API，未渲染或需点击的内容可缺失。
 - 普通 SVG paint 可内联；含主动内容、重复ID或样式表的 SVG 不晋升宿主DOM。无法本地化按失败/partial记录，不通过删除样式伪造完整还原。保留真实 DOCTYPE，短页面不因旧1000字符门槛误拒绝。
-- 输出目录必须为空或由 manifest/report及资源证明属于既有 huoqu副本；不因名字像 index.html/assets 就覆盖。替换失败恢复旧内容，恢复失败保留备份并报告。
+- 输出目录必须为空或由 manifest/report及资源证明属于既有 huoqu副本；不因名字像 index.html/assets 就覆盖。替换失败恢复旧内容，进程中断后的 staging/trash 会在下次采集前按 marker 和 PID 自动恢复或清理；无法确认归属的目录仍拒绝覆盖。
 - 只有资源完整、离线HTML/MHTML预览及内容/图片检查通过、浏览器清理成功，才是 `completed`；否则 `partial` 或明确失败。清理失败阻止新发布和旧副本替换，并报告残留profile。
-- 额外资源最多1200次，读取共1000MiB（失败响应也计入）；普通资源单个200MiB，音视频640MiB，最终MHTML1000MiB。404/410引用可移除而不因此判整次失败。
+- 额外资源最多1200次，读取共1000MiB（失败响应也计入）；普通资源单个200MiB，音视频640MiB，最终MHTML512MiB并采用流式组装。404/410引用可移除而不因此判整次失败。
 
 <details>
 <summary><strong>权限、后台任务及取消</strong></summary>
@@ -116,6 +121,8 @@ node --test test/*.test.mjs
 ```
 
 Host/桥接回归依赖同级 Chrome 插件。可选 `HUOQU_BROWSER_TESTS=1` 使用固定隔离shell；`DSH_OFFICIAL_ROOT` 可指向只读官方包验证真实SessionStore/权限契约。fixtures不接用户正式Chrome；模拟、合成页面与源码测试不能替代已部署采集验收。Host/Client 改动需 ⌘Q 重开后用新会话核对侧栏。
+
+默认 `npm test` 不依赖同级 Chrome 插件；真实 Chrome 和 Desktop BrowserHost 仍需分别做部署验收。
 
 ## 许可
 
