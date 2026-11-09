@@ -356,8 +356,7 @@ test("useTabInfo tab.sessionId enables capture when props.sessionId is absent", 
     let tree = client.render(props);
     assert.doesNotMatch(text(tree), /未关联当前会话/);
     assert.equal(button(tree, "选择文件夹").props.disabled, false);
-    assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "checkbox")[0].props.disabled, true);
-    assert.match(text(tree), /内置浏览器暂不支持私网采集/);
+    assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "checkbox")[0].props.disabled, false);
     const urlInput = walk(tree, (node) => node.type === "input" && node.props.type === "url")[0];
     assert.ok(urlInput, "url field missing");
     urlInput.props.onChange({ target: { value: "https://example.test/page" } });

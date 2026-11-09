@@ -396,13 +396,27 @@ test("embedded capture fails without its Desktop service and cleans its stage", 
   });
 });
 
-test("embedded capture rejects private-network opt-in instead of silently ignoring it", async () => {
+test("embedded capture passes the private-network policy into the Desktop BrowserHost contract", async () => {
   await temporaryDirectory(async dir => {
-    const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "private-unsupported" } };
+    const requests = [];
+    const operation = { cwd: dir, scope: { sessionId: "embedded-session", taskId: "private-supported" }, desktopBrowser: {
+      async execute(request) {
+        requests.push(request);
+        if (request.action === "capture_start") return { captureId: "private-capture", sourcePage: {
+          url: "http://127.0.0.1/", title: "Private fixture", viewport: { width: 800, height: 600 },
+          document: { width: 800, height: 600, htmlBytes: 80, textLength: 34 }, images: [], stylesheets: [], scripts: 0,
+        }, networkEvidence: [], networkFailures: [], warnings: [], scrollResult: { scrollHeight: 600, scrollSteps: 1 },
+        engine: { browserVersion: "145.0.7632.6" }, mhtmlBytes: 0, screenshotBytes: 0 };
+        if (request.action === "capture_close") return { closed: true };
+        throw new Error("unexpected embedded request");
+      },
+    } };
     await assert.rejects(capturePage({
       url: "http://127.0.0.1/", output_dir: dir, backend: "dsh-embedded", allow_private: true,
-    }, undefined, undefined, operation), /内置浏览器暂不支持私网采集/);
-    assert.deepEqual(await fs.readdir(dir), []);
+    }, undefined, undefined, operation), /Invalid embedded (?:screenshot|mhtml) size/);
+    const start = requests.find((request) => request.action === "capture_start");
+    assert.equal(start.allowPrivate, true);
+    assert.equal(requests.at(-1).action, "capture_close");
   });
 });
 
