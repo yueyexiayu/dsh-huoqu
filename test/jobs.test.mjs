@@ -57,16 +57,37 @@ test("partial capture is a distinct recoverable terminal result, never completed
   } finally { await manager.dispose(); }
 });
 
-test("job summaries redact credential query parameters while retaining the private execution URL", async () => {
+test("job summaries redact credential query parameters and never echo the raw URL to the renderer", async () => {
   const manager = createJobManager(async (_options, signal) => new Promise((_resolve, reject) => {
     signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   }));
   try {
     const job = manager.start({ ...options, url: "https://example.test/page?token=private&view=1" }, session);
+    // The Host keeps the real URL internally; only a redacted form crosses the API.
     assert.equal(job.options.url, "https://example.test/page?token=private&view=1");
     const summary = manager.list(session)[0];
     assert.equal(summary.url, "https://example.test/page?token=REDACTED&view=1");
-    assert.equal(summary.retryUrl, job.options.url);
+    assert.equal(summary.retryUrl, "https://example.test/page?token=REDACTED&view=1");
+    assert.equal(summary.urlRedacted, true);
+    assert.equal(
+      JSON.stringify(summary).includes("private"),
+      false,
+      "no field of a job summary may carry the raw credential",
+    );
+    manager.cancel(job.id, session);
+    await job.promise;
+  } finally { await manager.dispose(); }
+});
+
+test("a fragment credential is redacted as well as a query credential", async () => {
+  const manager = createJobManager(async (_options, signal) => new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  }));
+  try {
+    const job = manager.start({ ...options, url: "https://example.test/cb#access_token=SECRET123&state=x" }, session);
+    const summary = manager.list(session)[0];
+    assert.equal(JSON.stringify(summary).includes("SECRET123"), false);
+    assert.equal(summary.urlRedacted, true);
     manager.cancel(job.id, session);
     await job.promise;
   } finally { await manager.dispose(); }

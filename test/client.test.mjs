@@ -153,7 +153,7 @@ test("mount recovers an existing job, cancel is explicit, and remount restores p
   const requests = [];
   const job = {
     jobId: "persisted-job", status: "running", url: "https://example.test/private?token=REDACTED",
-    retryUrl: "https://example.test/private?token=private-value", outputDir: "/tmp/fixture",
+    retryUrl: "https://example.test/private?token=REDACTED", urlRedacted: true, outputDir: "/tmp/fixture",
     backend: "headless", allowPrivate: true,
   };
   const fetch = async (url, options) => {
@@ -169,7 +169,9 @@ test("mount recovers an existing job, cancel is explicit, and remount restores p
   assert.match(text(tree), /running/);
   assert.match(text(tree), /token=REDACTED/);
   assert.doesNotMatch(text(tree).replace(walk(tree, (node) => node.type === "input" && node.props.type === "url")[0].props.value, ""), /private-value/);
-  assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "url")[0].props.value, job.retryUrl);
+  // A redacted URL stays out of the input box; retrying replays the stored job on the Host.
+  assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "url")[0].props.value, "");
+  assert.match(text(tree), /该任务地址含凭据，已隐藏/);
   assert.equal(walk(tree, (node) => node.type === "select")[0].props.value, "headless");
   assert.equal(walk(tree, (node) => node.type === "input" && node.props.type === "checkbox")[0].props.checked, true);
   assert.match(text(tree), /静态渲染副本/);
