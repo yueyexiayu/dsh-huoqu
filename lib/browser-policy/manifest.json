@@ -1,0 +1,13 @@
+{
+  "name": "@deepseek-ai/dsh-browser-use",
+  "version": "0.2.1-alpha.4.browser-policy.1",
+  "dshLocalArtifactVersion": "0.2.1-alpha.4.browser-policy.1",
+  "dshSourceArtifact": {
+    "artifactKind": "off-cycle-local-private-browser-policy",
+    "baseCommit": "b879ccdbb11be87cd7c29bd86cc59c4b7a846425",
+    "localArtifactVersion": "0.2.1-alpha.4.browser-policy.1",
+    "sourceSha256": "1a0d4cb9021826ef0cbba2f63a0fd07d4f295fd01418f5e61754c9b897a362a8"
+  },
+  "vendored": true,
+  "note": "该包的 execution / headless-engine 两个零依赖模块已内联到同目录，不再从 node_modules 解析；此清单仅保留溯源字段。"
+}

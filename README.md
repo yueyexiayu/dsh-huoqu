@@ -4,7 +4,7 @@
 <p><strong>保存当前渲染状态，而不是假装复制整个网站。</strong></p>
 <p>DeepSeek Harness 的静态 HTML / MHTML 采集与离线核验插件。</p>
 <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
-<p><a href="package.json">v0.2.11</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="package.json">v0.2.12</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
 <p><a href="#核心能力">核心能力</a> · <a href="#工作方式">工作方式</a> · <a href="#快速开始">快速开始</a> · <a href="#用途与身份">用途与身份</a> · <a href="#产物与边界">产物与边界</a> · <a href="#验证">验证</a></p>
 </div>
 
@@ -55,7 +55,7 @@ npm run install:headless
 
 在该 profile 目录安装依赖，使 `node_modules/huoqu` 解析到本插件。**禁止**再在 desktop `cordis.patch.yml` 里 `- insert:` 同一 id；同一 id 既 bundle 又 insert 会变成两个实例。
 
-**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。选用当前 Chrome 身份时需要配套插件及扩展；内置身份需要支持采集并有 `allowPrivate` 契约的 Desktop BrowserHost。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为 0.2.11，不能用磁盘版本冒充已加载。
+**⌘Q 完全退出 DSH 后重开并建立新会话**，侧栏出现「网页获取」。选用当前 Chrome 身份时需要配套插件及扩展；内置身份需要支持采集并有 `allowPrivate` 契约的 Desktop BrowserHost。实际侧栏 GET `version`、工具新 schema 与结果 `pluginVersion` 应为 0.2.12，不能用磁盘版本冒充已加载。
 
 以下为匿名网页回归参数示例；输出路径须是全新目录或可核对归属的既有副本：
 
@@ -84,7 +84,7 @@ npm run install:headless
 
 默认 Playwright 缓存是 `~/Library/Caches/ms-playwright`。`PLAYWRIGHT_BROWSERS_PATH=0` 为插件包内安装；指定相对路径按 execution cwd。安装与启动 Host/测试必须采用同一缓存语义；同名变量优先于 npm config，即使为空也占优先级。相对路径刻意忽略 INIT_CWD。`HUOQU_CHROME_PATH` 只允许完整相同固定安装；空值、伪装二进制、GUI symlink、其他版本拒绝。
 
-[浏览器测量清单](lib/headless-browser.lock.json)记录官方 CLI 下载字节的本地测量 SHA，不是上游签名。更新/扩平台需同步依赖、lock和真实 OS/架构验收。共享执行策略来自随仓库 vendored 的 `0.2.1-alpha.4.browser-policy.1` 私有 off-cycle artifact，不是官方 full release，不改已安装 ASAR。
+[浏览器测量清单](lib/headless-browser.lock.json)记录官方 CLI 下载字节的本地测量 SHA，不是上游签名。更新/扩平台需同步依赖、lock和真实 OS/架构验收。共享执行策略已**内联**到 `lib/browser-policy/`（`execution.js`、`headless-engine.js` 与 `manifest.json`）：DSH 自 `0.2.2-rc.5` 起不再发布 `@deepseek-ai/dsh-browser-use`，内联的是上游实现里零第三方依赖的纯函数，逐字保留，`manifest.json` 记录来源版本 `0.2.1-alpha.4.browser-policy.1` 与 source provenance SHA-256，上游许可 MIT。依赖只剩 `playwright-core`，不改已安装 ASAR。
 
 </details>
 

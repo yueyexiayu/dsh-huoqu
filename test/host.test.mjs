@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { API_PATH, apply, inject, name } from "../lib/index.js";
 import { BROWSER_POLICY_PACKAGE } from "../lib/execution.js";
-import { pluginPackage, browserPolicyPackage } from "./package-fixture.mjs";
+import { pluginPackage } from "./package-fixture.mjs";
 
 test("host entry registers huoqu tool and the declared route", async () => {
   let tool;
@@ -55,14 +56,17 @@ test("host entry registers huoqu tool and the declared route", async () => {
   assert.match(rendered[0].text, /图片未加载/);
 });
 
-test("installed browser-policy package matches provenance metadata, not the tarball filename", async () => {
-  const provenance = JSON.parse(await readFile(new URL("../vendor/browser-execution/provenance.json", import.meta.url), "utf8"));
-  assert.equal(pluginPackage.version, "0.2.11");
-  assert.equal(browserPolicyPackage.version, provenance.version);
-  assert.equal(browserPolicyPackage.dshLocalArtifactVersion, provenance.version);
-  assert.equal(browserPolicyPackage.dshSourceArtifact?.sourceSha256, provenance.sourceSha256);
-  assert.equal(BROWSER_POLICY_PACKAGE.version, provenance.version);
-  assert.equal(BROWSER_POLICY_PACKAGE.localArtifactVersion, provenance.version);
-  assert.equal(BROWSER_POLICY_PACKAGE.sourceSha256, provenance.sourceSha256);
-  assert.notEqual(provenance.version, "0.2.1-alpha.2.browser-policy.1");
+test("inlined browser-policy code matches its provenance manifest, not a vendored tarball", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../lib/browser-policy/manifest.json", import.meta.url), "utf8"));
+  assert.equal(pluginPackage.version, "0.2.12");
+  assert.equal(manifest.version, "0.2.1-alpha.4.browser-policy.1");
+  assert.equal(manifest.dshLocalArtifactVersion, manifest.version);
+  assert.equal(manifest.dshSourceArtifact?.sourceSha256, "1a0d4cb9021826ef0cbba2f63a0fd07d4f295fd01418f5e61754c9b897a362a8");
+  assert.equal(BROWSER_POLICY_PACKAGE.name, manifest.name);
+  assert.equal(BROWSER_POLICY_PACKAGE.version, manifest.version);
+  assert.equal(BROWSER_POLICY_PACKAGE.localArtifactVersion, manifest.version);
+  assert.equal(BROWSER_POLICY_PACKAGE.sourceSha256, manifest.dshSourceArtifact.sourceSha256);
+  // 内联后不再有 node_modules 副本可解析，也不再有私有 tarball 目录。
+  assert.equal(existsSync(new URL("../vendor/browser-execution", import.meta.url)), false);
+  await assert.rejects(import("@deepseek-ai/dsh-browser-use/execution"));
 });
