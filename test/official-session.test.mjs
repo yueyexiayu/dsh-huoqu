@@ -22,6 +22,9 @@ test("official live SessionStore, projection policy and local FS honor dynamic s
     assert.equal(ctx.sessions.get(session.id), undefined, "prepared/detached replay is not loaded");
     assert.throws(() => captureSession(ctx, session.id), (error) => error.status === 403);
     detach = ctx.sessions.enter(session);
+    // Official 0.2.3-alpha.2 stops implying session/created from enter(): appends
+    // stay refused until announce() completes. Older builds have no announce().
+    ctx.sessions.announce?.(session);
     assert.equal(captureSession(ctx, session.id), session);
     setSandboxMode(session, "workspace-write");
     const access = await createCaptureAccess(ctx, { agent: { session } });
@@ -35,6 +38,7 @@ test("official live SessionStore, projection policy and local FS honor dynamic s
     await assert.rejects(access.assertWrite("/tmp/huoqu-official-fixture"), (error) => error.status === 403);
     const replacement = ctx.sessions.prepare(session.id, { meta: { cwd: "/tmp" } });
     detach = ctx.sessions.enter(replacement);
+    ctx.sessions.announce?.(replacement);
     await assert.rejects(createCaptureAccess(ctx, { agent: { session } }), (error) => error.status === 403);
   } finally {
     detach?.();
