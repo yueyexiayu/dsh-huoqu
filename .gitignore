@@ -1,4 +1,5 @@
 .DS_Store
+.jilv/
 node_modules/
 *.log
 .idea/
