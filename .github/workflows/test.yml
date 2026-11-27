@@ -18,6 +18,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Install pinned headless shell
+        run: npm run install:headless
       - name: Syntax check
         run: for file in lib/*.js; do node --check "$file"; done
       - run: npm test
