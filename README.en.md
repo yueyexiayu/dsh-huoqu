@@ -4,7 +4,7 @@
 <p><strong>Save the rendered state—not a fictional copy of an entire website.</strong></p>
 <p>Static HTML/MHTML capture and offline verification for DeepSeek Harness.</p>
 <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
-<p><a href="package.json">v0.2.12</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="package.json">v0.2.13</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
 <p><a href="#features">Features</a> · <a href="#how-it-works">How it works</a> · <a href="#quick-start">Quick start</a> · <a href="#purpose-and-identity">Purpose and identity</a> · <a href="#outputs-and-boundaries">Outputs and boundaries</a> · <a href="#validation">Validation</a></p>
 </div>
 
@@ -23,6 +23,8 @@ A reference for a personal desktop workflow. The sidebar offers the DSH embedded
 <td><strong>🛡 Session file policy</strong><br/><br/>Official sandboxPolicy/fs and the real loaded Session govern writes, replacement and cleanup.</td>
 <td><strong>🧾 Honest outcomes</strong><br/><br/>A saved file is not a pass. Cleanup failure blocks publication; unknown directories are not overwritten.</td>
 </tr></table>
+
+Docs: [API contract](docs/API.md) · [changelog](CHANGELOG.md) · [latest acceptance record](docs/ACCEPTANCE-0.2.13.md) · [AI working agreement](AGENTS.md)
 
 ## How it works
 
@@ -55,7 +57,7 @@ Load it as a **desktop profile bundle**. Add `huoqu` in both places in `$DSH_HOM
 
 Install the profile so `node_modules/huoqu` resolves to this plugin. **Do not** also `- insert:` the same id in desktop `cordis.patch.yml`; bundling and inserting the same id creates two instances.
 
-**Quit DSH fully with ⌘Q, reopen it and start a new session.** The sidebar shows webpage capture. Chrome capture needs the paired extension; embedded capture needs a Desktop BrowserHost with the `allowPrivate` capture contract. Verify actual sidebar GET `version`, new tool schema and result `pluginVersion` as 0.2.12; disk declarations are not loaded-runtime proof.
+**Quit DSH fully with ⌘Q, reopen it and start a new session.** The sidebar shows webpage capture. Chrome capture needs the paired extension; embedded capture needs a Desktop BrowserHost with the `allowPrivate` capture contract. Verify actual sidebar GET `version`, new tool schema and result `pluginVersion` as 0.2.13; disk declarations are not loaded-runtime proof.
 
 Example anonymous web-regression parameters; the output must be new or a verifiably owned previous capture:
 

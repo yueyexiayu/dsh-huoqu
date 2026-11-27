@@ -58,7 +58,7 @@ test("host entry registers huoqu tool and the declared route", async () => {
 
 test("inlined browser-policy code matches its provenance manifest, not a vendored tarball", async () => {
   const manifest = JSON.parse(await readFile(new URL("../lib/browser-policy/manifest.json", import.meta.url), "utf8"));
-  assert.equal(pluginPackage.version, "0.2.12");
+  assert.equal(pluginPackage.version, "0.2.13");
   assert.equal(manifest.version, "0.2.1-alpha.4.browser-policy.1");
   assert.equal(manifest.dshLocalArtifactVersion, manifest.version);
   assert.equal(manifest.dshSourceArtifact?.sourceSha256, "1a0d4cb9021826ef0cbba2f63a0fd07d4f295fd01418f5e61754c9b897a362a8");
